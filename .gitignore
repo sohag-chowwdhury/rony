@@ -1,0 +1,16 @@
+﻿node_modules/
+functions/node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.firebase/
+*-debug.log
+*service-account*.json
+
+# Portable runtime used only for local audit tests
+.audit-tools/
+
+# Local editor metadata and logs
+.mault/
+.memory-layer/

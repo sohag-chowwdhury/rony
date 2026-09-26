@@ -1,0 +1,90 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  function owner(uid) { return request.auth != null && request.auth.uid == uid && (request.auth.token.get('ledgerAccess',false) == true || uid == 'WBQIfRwKFEeTXhS1VT8n8WgL0612'); }
+  function root(uid) { return /databases/$(database)/documents/ledgers/$(uid); }
+  function meta(uid) { return getAfter(root(uid)).data; }
+  function operation(uid) { return meta(uid).lastOperation; }
+  function bulk(uid) { return operation(uid).entity == 'ledger' && operation(uid).action in ['restore','import']; }
+  function advancing(uid) { return meta(uid).revision == (exists(root(uid)) ? get(root(uid)).data.get('revision',0) : 0) + 1 && meta(uid).updatedAt == request.time; }
+  function auditPath(uid) { return /databases/$(database)/documents/ledgers/$(uid)/activity/$(operation(uid).id); }
+  function authorizedChange(uid,entity,id) { return owner(uid) && advancing(uid) && existsAfter(auditPath(uid)) && (bulk(uid) || (operation(uid).entity == entity && operation(uid).entityId == id)); }
+  function money(value,zero) { return value is int && value >= (zero ? 0 : 1) && value <= 9007199254740991; }
+  function date(value) { return value is string && value.matches('^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'); }
+  function text(value) { return value is string && value.size() > 0 && value.size() <= 4000; }
+  function agencyPath(uid,id) { return /databases/$(database)/documents/ledgers/$(uid)/agencies/$(id); }
+  function transactionPath(uid,id) { return /databases/$(database)/documents/ledgers/$(uid)/transactions/$(id); }
+  function reversalPath(uid,id) { return /databases/$(database)/documents/ledgers/$(uid)/reversals/$(id); }
+  function open(uid,t,after) {
+   let a = after ? getAfter(agencyPath(uid,t.agencyId)).data : get(agencyPath(uid,t.agencyId)).data;
+   return (a.get('openingDate','') == '' || t.date >= a.openingDate) && (a.get('closedThrough','') == '' || t.date > a.closedThrough);
+  }
+  function validAgency(uid,id,a) {
+   return a.keys().hasOnly(['id','code','name','contact','phone','address','opening','openingSide','active','archivedAt','openingDate','closedThrough']) && a.id == id && text(a.code) && text(a.name) && a.active is bool && money(a.opening,true) && a.openingSide in ['Dr','Cr'] && (a.get('openingDate','') == '' || date(a.openingDate)) && (a.get('closedThrough','') == '' || (date(a.closedThrough) && meta(uid).hasClosedPeriods == true && a.closedThrough >= a.get('openingDate','')));
+  }
+  function protectedAgency(a,b) { return a.get('closedThrough','') == '' || (b.get('closedThrough','') >= a.closedThrough && b.opening == a.opening && b.openingSide == a.openingSide && b.get('openingDate','') == a.get('openingDate','')); }
+  function validMatch(t) {
+   let m=t.get('reconciliation',{});
+   return m == {} || (t.type == 'payment' && t.get('reversalOf','') == '' && m.keys().hasOnly(['bankAccount','bankReference','date','amount']) && text(m.bankAccount) && text(m.bankReference) && date(m.date) && m.amount == t.amount);
+  }
+  function validTransaction(uid,id,t) {
+   return t.keys().hasOnly(['id','type','agencyId','date','voucher','reference','ticket','passenger','sector','flightDate','amount','method','bank','sendingBank','receivingBank','sendingBankName','receivingBankName','chequeNumber','chequeDate','walletNumber','narration','status','createdAt','archivedAt','reversalOf','reconciliation']) && t.id == id && t.type in ['sale','payment'] && text(t.agencyId) && date(t.date) && text(t.voucher) && text(t.createdAt) && t.status == 'synced' && money(t.amount,false) && existsAfter(agencyPath(uid,t.agencyId)) && validMatch(t);
+  }
+  function validReversal(uid,t) {
+   let original=getAfter(transactionPath(uid,t.reversalOf)).data;
+   let index=getAfter(reversalPath(uid,t.reversalOf)).data;
+   return original.get('reversalOf','') == '' && original.get('reconciliation',{}) == {} && original.agencyId == t.agencyId && original.amount == t.amount && original.type != t.type && t.date >= original.date && index.reversalId == t.id && index.originalId == original.id;
+  }
+  function newTransaction(uid,t) {
+   let imported=bulk(uid) && (!exists(agencyPath(uid,t.agencyId)) || get(agencyPath(uid,t.agencyId)).data.get('closedThrough','') == '');
+   return (imported || open(uid,t,true)) && (t.get('reversalOf','') == '' || validReversal(uid,t));
+  }
+  function financialEdit(uid,a,b) {
+   return a.get('reversalOf','') == '' && !exists(reversalPath(uid,a.id)) && a.get('reconciliation',{}) == {} && open(uid,a,false) && (bulk(uid) || open(uid,b,true)) && a.createdAt == b.createdAt && b.get('reversalOf','') == '';
+  }
+  function presentationEdit(uid,a,b) {
+   let changed=b.diff(a).affectedKeys();
+   return changed.hasOnly(['archivedAt','status']) || (changed.hasOnly(['reconciliation','status']) && a.type == 'payment' && a.get('reversalOf','') == '' && !exists(reversalPath(uid,a.id)));
+  }
+  match /ledgers/{uid} {
+   allow read: if owner(uid);
+   allow create,update: if owner(uid) && request.resource.data.keys().hasOnly(['revision','ownerUid','updatedAt','hasClosedPeriods','lastOperation']) && request.resource.data.ownerUid == uid && request.resource.data.hasClosedPeriods is bool && (!exists(root(uid)) || !resource.data.get('hasClosedPeriods',false) || request.resource.data.hasClosedPeriods) && advancing(uid) && existsAfter(auditPath(uid)) && (!bulk(uid) || ((!exists(root(uid)) || !resource.data.get('hasClosedPeriods',false)) && existsAfter(/databases/$(database)/documents/ledgers/$(uid)/recovery/$(operation(uid).id))));
+   allow delete: if false;
+   match /agencies/{id} {
+    allow read: if owner(uid);
+    allow create: if authorizedChange(uid,'agency',id) && validAgency(uid,id,request.resource.data);
+    allow update: if authorizedChange(uid,'agency',id) && validAgency(uid,id,request.resource.data) && protectedAgency(resource.data,request.resource.data);
+    allow delete: if authorizedChange(uid,'agency',id) && bulk(uid) && resource.data.get('closedThrough','') == '';
+   }
+   match /transactions/{id} {
+    allow read: if owner(uid);
+    allow create: if authorizedChange(uid,'transaction',id) && validTransaction(uid,id,request.resource.data) && newTransaction(uid,request.resource.data);
+    allow update: if authorizedChange(uid,'transaction',id) && validTransaction(uid,id,request.resource.data) && (presentationEdit(uid,resource.data,request.resource.data) || financialEdit(uid,resource.data,request.resource.data));
+    allow delete: if authorizedChange(uid,'transaction',id) && bulk(uid) && open(uid,resource.data,false) && resource.data.get('reversalOf','') == '' && !exists(reversalPath(uid,id));
+   }
+   match /activity/{id} {
+    allow read: if owner(uid);
+    function target(entity,entityId) { return entity == 'agency' ? agencyPath(uid,entityId) : transactionPath(uid,entityId); }
+    function genuineEvent(e) {
+     let path=target(e.entity,e.entityId);
+     return e.entity in ['agency','transaction'] && e.entityId == operation(uid).entityId && e.entity == operation(uid).entity && e.before == (exists(path) ? get(path).data : null) && e.after == (existsAfter(path) ? getAfter(path).data : null);
+    }
+    allow create: if owner(uid) && advancing(uid) && request.resource.data.id == id && request.resource.data.actorUid == uid && ( (id == operation(uid).id && request.resource.data.action == operation(uid).action && request.resource.data.committedAt == request.time && request.resource.data.actor == request.auth.token.get('email',uid) && (bulk(uid) || genuineEvent(request.resource.data))) || (bulk(uid) && request.resource.data.get('imported',false) && request.resource.data.importOperation == operation(uid).id && request.resource.data.actor == 'Restored backup history (unverified)') );
+    allow update,delete: if false;
+   }
+   match /recovery/{id} {
+    allow read: if owner(uid);
+    allow create: if owner(uid) && advancing(uid) && bulk(uid) && id == operation(uid).id && request.resource.data.createdAt == request.time && request.resource.data.snapshot.revision == (exists(root(uid)) ? get(root(uid)).data.get('revision',0) : 0);
+    allow update,delete: if false;
+   }
+   match /reversals/{id} {
+    allow read: if owner(uid);
+    function validIndex() { let r=getAfter(transactionPath(uid,request.resource.data.reversalId)).data;return request.resource.data.originalId == id && r.reversalOf == id; }
+    allow create: if owner(uid) && advancing(uid) && (bulk(uid) || operation(uid).action == 'reverse') && validIndex();
+    allow update: if owner(uid) && advancing(uid) && bulk(uid) && validIndex();
+    allow delete: if owner(uid) && advancing(uid) && bulk(uid) && !existsAfter(transactionPath(uid,resource.data.reversalId));
+   }
+  }
+  match /{document=**} { allow read,write: if false; }
+ }
+}
