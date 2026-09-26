@@ -1,0 +1,10 @@
+.git/
+node_modules/
+dist/
+.audit-tools/
+.mault/
+.memory-layer/
+.env
+.env.*
+*.log
+*service-account*.json

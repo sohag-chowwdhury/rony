@@ -14,3 +14,5 @@ dist/
 # Local editor metadata and logs
 .mault/
 .memory-layer/
+.vercel
+.env*.local
