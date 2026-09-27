@@ -16,3 +16,16 @@ test('empty full ledger retains opening date and balance',()=>{
  const result=completeLedger({id:'a',opening:7000,openingSide:'Dr',openingDate:'2026-09-27'},[],'2026-09-27');
  assert.equal(result.rows.length,0);assert.equal(result.closing,7000);assert.equal(result.from,result.to);
 });
+
+test('ledger and full PDF place the last saved entry at the bottom even when backdated',async()=>{
+ const {compareLedgerEntries}=await import('../src/shared/accounting.mjs');
+ const agency={id:'a',opening:0,openingSide:'Dr'};
+ const base={agencyId:'a',type:'sale',amount:100,date:'2026-09-27'};
+ const rows=[{...base,id:'latest',voucher:'last',createdAt:'2026-09-27T10:00:00Z'},{...base,id:'earlier',voucher:'first',createdAt:'2026-09-27T14:00:00+06:00'},{...base,id:'previous',voucher:'old',date:'2026-09-26',createdAt:'2026-09-27T12:00:00Z'}];
+ const expected=['earlier','latest','previous'];
+ assert.deepEqual([...rows].sort(compareLedgerEntries).map(t=>t.id),expected);
+ const full = completeLedger(agency,rows,'2026-09-27');
+ assert.deepEqual(full.rows.map(({t})=>t.id),expected);
+ assert.deepEqual(full.rows.map(({running})=>running),[100,200,300]);
+ assert.equal(full.closing,300);
+});

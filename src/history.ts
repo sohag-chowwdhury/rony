@@ -1,7 +1,7 @@
 ﻿export type AuditEvent = {
     id: string;
     timestamp: string;
-    action: "create" | "edit" | "delete" | "archive" | "restore" | "deactivate" | "import" | "reverse" | "reconcile" | "unreconcile" | "close";
+    action: "migrate" | "create" | "edit" | "delete" | "archive" | "restore" | "deactivate" | "import" | "reverse" | "reconcile" | "unreconcile" | "close";
     entity: "agency" | "transaction" | "ledger";
     entityId: string;
     label: string;

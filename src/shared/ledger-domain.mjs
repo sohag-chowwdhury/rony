@@ -1,8 +1,8 @@
 import { validateOpening, protectTransaction, makeReversal, validateMatch, validateBackup } from './ledgerControls.mjs';
-import { validatePaymentDetails, assertMinor, validateEntry, getBalance, canDeleteAgency, validDate } from './accounting.mjs';
+import { validatePaymentDetails, assertMinor, validateEntry, getBalance, canDeleteAgency, validDate, outgoingMigration, ticketHistory } from './accounting.mjs';
 const textFields = ['id','code','name','contact','phone','address','agencyId','date','voucher','reference','ticket','passenger','sector','flightDate','method','bank','sendingBank','receivingBank','sendingBankName','receivingBankName','chequeNumber','chequeDate','walletNumber','narration','createdAt','archivedAt','openingDate','closedThrough','reversalOf'];
 const agencyFields = ['id','code','name','contact','phone','address','opening','openingSide','active','archivedAt','openingDate','closedThrough'];
-const transactionFields = ['id','type','agencyId','date','voucher','reference','ticket','passenger','sector','flightDate','amount','ticketCost','method','bank','sendingBank','receivingBank','sendingBankName','receivingBankName','chequeNumber','chequeDate','walletNumber','narration','status','createdAt','archivedAt','reversalOf','reconciliation'];
+const transactionFields = ['id','type','agencyId','date','voucher','reference','ticket','passenger','sector','flightDate','amount','ticketCost','method','bank','sendingBank','receivingBank','sendingBankName','receivingBankName','chequeNumber','chequeDate','walletNumber','narration','status','createdAt','archivedAt','reversalOf','reconciliation','migration','nextMigration'];
 export function validateId(id) {
   if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(id)) throw Error('Invalid record ID.');
 }
@@ -40,9 +40,11 @@ export function applyMutation(snapshot, command, actor, timestamp) {
   const { entity, action, id } = command;
   if (!['agency','transaction'].includes(entity) || !['create','edit','delete','archive','restore','deactivate','reverse','reconcile','unreconcile'].includes(action)) throw Error('Unsupported action.');
   validateId(id);
+  if (action === 'create' || action === 'edit') { if ((command.record?.migration || command.record?.nextMigration)) throw Error('Use the ticket migration action.'); }
   const list = entity === 'agency' ? snapshot.agencies : snapshot.transactions;
   const before = list.find(item => item.id === id) || null;
   if (action === 'create' ? Boolean(before) : !before) throw Error(action === 'create' ? 'Record already exists.' : 'Record no longer exists.');
+  if (before?.migration) throw Error('Linked migration records cannot be changed individually.');
   if (action === 'reverse') {
     if (entity !== 'transaction') throw Error('Only transactions can be reversed.');
     const after=makeReversal(snapshot,before,command.record?.date,command.record?.reason || '',command.operationId,timestamp);
@@ -96,8 +98,33 @@ export function validateImport(input) {
   for(const raw of input.transactions) { const tx=cleanRecord('transaction',raw);if(!tx.createdAt || !Number.isFinite(Date.parse(tx.createdAt)))throw Error('Imported transactions need a valid creation timestamp.');validateEntry(tx,agencies,transactions);transactions.push(tx); }
   for(const event of input.activity) {
     validateId(event.id);
-    if (!['create','edit','delete','archive','restore','deactivate','import','reverse','reconcile','unreconcile','close'].includes(event.action) || !['agency','transaction','ledger'].includes(event.entity) || typeof event.label!=='string' || !Number.isFinite(Date.parse(event.timestamp))) throw Error('Invalid historical activity.');
+    if (!['create','edit','delete','archive','restore','deactivate','import','reverse','reconcile','unreconcile','close','migrate'].includes(event.action) || !['agency','transaction','ledger'].includes(event.entity) || typeof event.label!=='string' || !Number.isFinite(Date.parse(event.timestamp))) throw Error('Invalid historical activity.');
   }
   if(new Set(input.activity.map(e=>e.id)).size!==input.activity.length)throw Error('Duplicate history IDs.');
   return {agencies,transactions,activity:input.activity};
+}
+
+export function applyTicketMigration(snapshot, request, actor, timestamp, options = {}) {
+  const {sourceId, destination, operationId} = request;
+  validateId(operationId); validateId(sourceId);
+  const source = snapshot.transactions.find(t => t.id === sourceId);
+  if (!source || source.type !== 'sale' || source.archivedAt || outgoingMigration(source) || source.reversalOf) throw Error('Select an active, unmigrated ticket sale.');
+  if (source.amount !== request.sourcePrice) throw Error("Source price changed. Close and reopen the migration form.");
+  if (options.legacyCloud && source.migration) throw Error('Further migration is unavailable with the current cloud rules.');
+  protectTransaction(snapshot,{...source,migration:undefined},null);
+  const root=ticketHistory(source,snapshot.transactions)[0];
+  const from = snapshot.agencies.find(a => a.id === source.agencyId);
+  const to = snapshot.agencies.find(a => a.id === destination.agencyId);
+  if (!from || from.archivedAt || !to || !to.active || to.archivedAt || from.id === to.id) throw Error('Select a different active destination agency.');
+  if (destination.date < source.date) throw Error('Migration date cannot precede the original sale.');
+  const sale = cleanRecord('transaction',{...destination,id:operationId+'_sale',type:'sale',ticketCost:options.legacyCloud ? source.amount : root.ticketCost,createdAt:timestamp,status:'synced'});
+  const credit = cleanRecord('transaction',{id:operationId+'_credit',type:'payment',agencyId:source.agencyId,date:sale.date,voucher:'C-'+operationId,amount:source.amount,createdAt:timestamp,status:'synced',narration:'Ticket adjustment',ticket:source.ticket,passenger:source.passenger});
+  protectTransaction(snapshot,null,credit);protectTransaction(snapshot,null,sale);
+  validateEntry(credit,snapshot.agencies,snapshot.transactions);
+  validateEntry(sale,snapshot.agencies,[...snapshot.transactions,credit]);
+  const migration={...(options.legacyCloud ? {} : {rootId:root.id}),id:operationId,sourceId,creditId:credit.id,saleId:sale.id,fromAgencyId:from.id,toAgencyId:to.id,sourcePrice:source.amount,sellingPrice:sale.amount,createdAt:timestamp};
+  const after={...source,...(source.migration ? {nextMigration:migration} : {migration})};credit.migration=migration;sale.migration=migration;
+  const next={...snapshot,transactions:[...snapshot.transactions.map(t=>t.id===sourceId?after:t),credit,sale]};
+  const event={id:operationId,timestamp,action:'migrate',entity:'transaction',entityId:sourceId,label:source.voucher,actor,before:source,after};
+  return {next,event,after,credit,sale};
 }

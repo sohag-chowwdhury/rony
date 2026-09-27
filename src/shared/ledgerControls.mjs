@@ -1,4 +1,4 @@
-import { getBalance, validDate, validateEntry, assertMinor, safeAdd } from "./accounting.mjs";
+import { getBalance, validDate, validateEntry, assertMinor, safeAdd, outgoingMigration, ticketHistory } from "./accounting.mjs";
 export function validateOpening(agency, previous, entries) {
 	if (agency.openingDate && !validDate(agency.openingDate)) throw Error("Enter a valid opening balance date.");
 	const today = new Intl.DateTimeFormat("en-CA", {
@@ -21,6 +21,7 @@ export function assertOpen(agency, date) {
 }
 export function protectTransaction(snapshot, before, after) {
 	if (before) {
+		if (before.migration) throw Error("Linked migration records cannot be changed individually.");
 		if (before.reversalOf || snapshot.transactions.some((t) => t.reversalOf === before.id)) throw Error("Reversed entries and reversal entries cannot be edited or deleted.");
 		if (before.reconciliation) throw Error("Remove the bank match before editing this receipt.");
 		assertOpen(snapshot.agencies.find((a) => a.id === before.agencyId), before.date);
@@ -28,6 +29,7 @@ export function protectTransaction(snapshot, before, after) {
 	if (after) assertOpen(snapshot.agencies.find((a) => a.id === after.agencyId), after.date);
 }
 export function makeReversal(snapshot, original, date, reason, newId, timestamp) {
+	if (original.migration) throw Error("Linked migration records cannot be reversed individually.");
 	if (original.reconciliation) throw Error("Remove the bank match before reversing this receipt.");
 	if (typeof reason !== "string" || !reason.trim()) throw Error("Enter a reason for this reversal.");
 	if (reason.trim().length > 1e3) throw Error("Reversal reason must be at most 1000 characters.");
@@ -50,6 +52,7 @@ export function makeReversal(snapshot, original, date, reason, newId, timestamp)
 	return next;
 }
 export function validateMatch(snapshot, tx, match) {
+	if (tx.migration) throw Error("Migration credits cannot be matched as receipts.");
 	if (tx.type !== "payment" || tx.reversalOf || snapshot.transactions.some((t) => t.reversalOf === tx.id)) throw Error("Only unreversed payment receipts can be matched.");
 	if (!match || typeof match !== "object" || !validDate(match.date) || typeof match.bankReference !== "string" || !match.bankReference.trim() || typeof match.bankAccount !== "string" || !match.bankAccount.trim()) throw Error("Enter the bank account, statement date and reference.");
 	if (match.bankReference.length > 200 || match.bankAccount.length > 200 || Object.keys(match).some((k) => ![
@@ -141,6 +144,50 @@ export function validateBackup(input) {
 		}
 		if (t.reconciliation) validateMatch(data, t, t.reconciliation);
 	}
+	for (const t of data.transactions) {
+		if (t.nextMigration && (!t.migration || t.migration.saleId !== t.id)) throw Error("Invalid onward migration.");
+		for (const m of [t.migration, t.nextMigration]) {
+			if (!m) continue;
+			if (typeof m !== "object" || Object.keys(m).some((key) => ![
+				"id",
+				"sourceId",
+				"creditId",
+				"saleId",
+				"fromAgencyId",
+				"toAgencyId",
+				"sourcePrice",
+				"sellingPrice",
+				"createdAt",
+				"rootId"
+			].includes(key))) throw Error("Invalid migration metadata.");
+			for (const value of [
+				m.id,
+				m.sourceId,
+				m.creditId,
+				m.saleId,
+				m.fromAgencyId,
+				m.toAgencyId
+			]) checkId(value);
+			if (m.rootId !== undefined) checkId(m.rootId);
+			assertMinor(m.sourcePrice);
+			assertMinor(m.sellingPrice);
+			const source = data.transactions.find((x) => x.id === m.sourceId), credit = data.transactions.find((x) => x.id === m.creditId), sale = data.transactions.find((x) => x.id === m.saleId);
+			if (!source || !credit || !sale || ![
+				m.sourceId,
+				m.creditId,
+				m.saleId
+			].includes(t.id) || m.creditId !== m.id + "_credit" || m.saleId !== m.id + "_sale" || m.fromAgencyId === m.toAgencyId || !Number.isFinite(Date.parse(m.createdAt))) throw Error("Incomplete migration relationship.");
+			if ([
+				source,
+				credit,
+				sale
+			].some((x) => {
+				const link = x.id === m.sourceId ? outgoingMigration(x) : x.migration;
+				return !link || Object.keys(m).some((key) => link[key] !== m[key]) || x.archivedAt || x.reversalOf;
+			})) throw Error("Inconsistent migration records.");
+			if (source.type !== "sale" || source.agencyId !== m.fromAgencyId || source.amount !== m.sourcePrice || credit.type !== "payment" || credit.agencyId !== m.fromAgencyId || credit.amount !== m.sourcePrice || sale.type !== "sale" || sale.agencyId !== m.toAgencyId || sale.amount !== m.sellingPrice || (m.rootId ? ticketHistory(source, data.transactions)[0].id !== m.rootId || sale.ticketCost !== ticketHistory(source, data.transactions)[0].ticketCost : sale.ticketCost !== m.sourcePrice) || credit.date !== sale.date || sale.date < source.date || credit.createdAt !== m.createdAt || sale.createdAt !== m.createdAt) throw Error("Invalid migration amounts or dates.");
+		}
+	}
 	const events = new Set();
 	for (const event of data.activity) {
 		if (!event || typeof event !== "object") throw Error("Invalid activity history.");
@@ -160,7 +207,8 @@ export function validateBackup(input) {
 			"reverse",
 			"reconcile",
 			"unreconcile",
-			"close"
+			"close",
+			"migrate"
 		].includes(event.action)) throw Error("Invalid activity history.");
 		events.add(event.id);
 	}

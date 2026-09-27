@@ -659,3 +659,5 @@ html:root { background: #050707; }
 .firebase-migration p { color: var(--muted); font-size: 13px; line-height: 1.6; }
 .firebase-migration button { margin: 4px 12px 4px 0; }
 button:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.transaction-action-menu { background: #132626; }

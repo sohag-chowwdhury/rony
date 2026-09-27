@@ -1971,3 +1971,25 @@ button {
 .reconciliation-table { overflow-x:auto; }
 .save-status { padding:12px 24px; color:#157347; }
 .form-save-error { padding:12px 24px; color:#b42318; }
+
+.agency-contact-buttons { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 5px; }
+.agency-contact-buttons a { text-decoration: none; white-space: nowrap; }
+.agency-contact-buttons button:disabled { opacity: 0.45; cursor: not-allowed; }
+@media print { .agency-contact-buttons { display: none !important; } }
+
+.migration-tag { display:inline-block; width:auto; min-width:0; min-height:0; margin:0; padding:0; border:0; border-radius:0; font-size:9px; font-weight:400; line-height:1.2; color:var(--teal); background:transparent; cursor:pointer; }
+.migration-tag:hover { text-decoration:underline; }
+.migration-tag:focus-visible { outline:1px solid var(--teal); outline-offset:2px; }
+.ledger-amount > .migration-tag { display:block; margin-top:2px; }
+.migration-details { display:grid; grid-template-columns:1fr 1.5fr; gap:12px; }
+.migration-details dd { margin:0; overflow-wrap:anywhere; }
+@media print { .migration-tag { display:none !important; } }
+
+.transaction-action-menu { position:fixed; z-index:1500; width:160px; padding:6px; border:1px solid var(--line); border-radius:10px; background:var(--surface, #fff); box-shadow:0 8px 28px #0003; }
+.transaction-action-menu button { display:block; width:100%; text-align:left; padding:9px 12px; border:0; border-radius:6px; background:transparent; color:var(--ink); cursor:pointer; font:inherit; }
+.transaction-action-menu button:hover, .transaction-action-menu button:focus-visible { background:#36bfa520; outline:2px solid var(--teal); }
+.transaction-action-menu button.danger { color:#d56c3c; }
+.transaction-action-menu button:disabled { opacity:.4; cursor:not-allowed; }
+@media print { .transaction-action-menu, .transaction-menu-trigger { display:none !important; } }
+
+.ledger-row .ledger-description { overflow-wrap: anywhere; white-space: normal; line-height: 1.5; margin-bottom: 8px; }

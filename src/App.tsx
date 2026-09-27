@@ -1,3 +1,9 @@
+import { createPortal } from "react-dom";
+import { applyTicketMigration } from "./shared/ledger-domain.mjs";
+import type { MigrationRequest } from "./directLedger";
+import { agencyContactLinks } from "./agencyContact";
+import { transactionLedgerNarration } from "./accounting";
+import { Phone, MessageCircle } from "lucide-react";
 import { validateOpening, protectTransaction, makeReversal, validateMatch, validateBackup } from "./ledgerControls";
 import { LedgerTools } from "./LedgerTools";
 import InstallGuide from "./InstallGuide";
@@ -46,7 +52,7 @@ import {
     Wallet,
     X,
 } from "lucide-react";
-import { validatePaymentDetails, parseMoney, assertMinor, getBalance, balanceMeta, calculateLedger, validateEntry, amountInWords, ticketProfit, profitSummary, ledgerDateWindow, completeLedger } from "./accounting";
+import { isTaxRefund, validatePaymentDetails, parseMoney, assertMinor, getBalance, balanceMeta, calculateLedger, validateEntry, amountInWords, ticketProfit, profitSummary, ledgerDateWindow, completeLedger, activeLedgerRecords, compareLedgerEntries, outgoingMigration, ticketHistory, originalTicketCost } from "./accounting";
 import { readLedgerSnapshot, persistLedger, makeAuditEvent, auditChanges, changeArchive, LEDGER_STORAGE_KEY, type AuditEvent } from "./history";
 import { useCloudLedger } from "./FirebaseGate";
 import { firebaseServices } from "./firebase";
@@ -87,6 +93,8 @@ export type Agency = {
 export type Transaction = {
     id: string;
     type: TxType;
+    nextMigration?: Transaction['migration'];
+    migration?: { rootId?: string; id: string; sourceId: string; creditId: string; saleId: string; fromAgencyId: string; toAgencyId: string; sourcePrice: number; sellingPrice: number; createdAt: string };
     reversalOf?: string;
     reconciliation?: { bankAccount: string; bankReference: string; date: string; amount: number };
     agencyId: string;
@@ -308,6 +316,15 @@ function useLedgerStore() {
         current.current = next;
         setSnapshot(next);
     };
+    const migrate = async (request: MigrationRequest) => {
+        if (cloud) {
+            const next = await cloud.migrate(request, current.current.revision || 0);
+            if (next.revision >= (current.current.revision || 0)) { current.current=next;setSnapshot(next); }
+        } else {
+            const result=applyTicketMigration(current.current,request,"Local user",new Date().toISOString());
+            await commit(result.next.agencies,result.next.transactions,result.event);
+        }
+    };
     const add = (tx: Transaction) => {
         protectTransaction(current.current, null, tx);
         validateEntry(tx, current.current.agencies, current.current.transactions);
@@ -361,6 +378,7 @@ function useLedgerStore() {
     };
     const deleteTransaction = (transactionId: string) => {
         const before = requireTransaction(transactionId);
+        if (before.migration) throw Error("Linked migration records cannot be archived individually.");
         const after = changeArchive(before, true);
         return commit(current.current.agencies, current.current.transactions.map(item => item.id === transactionId ? after : item), makeAuditEvent("transaction", "archive", before, after));
     };
@@ -374,7 +392,9 @@ function useLedgerStore() {
         return commit(current.current.agencies, current.current.transactions.map(item => item.id === after.id ? after : item), makeAuditEvent("transaction", "edit", before, after));
     };
     const setArchived = (transactionId: string, archived: boolean) => {
-        const before = requireTransaction(transactionId), after = changeArchive(before, archived);
+        const before = requireTransaction(transactionId);
+        if (before.migration) throw Error("Linked migration records cannot be archived individually.");
+        const after = changeArchive(before, archived);
         return commit(current.current.agencies, current.current.transactions.map(item => item.id === transactionId ? after : item), makeAuditEvent("transaction", archived ? "archive" : "restore", before, after));
     };
     const reverse = (transactionId: string, date: string, reason: string) => {
@@ -414,7 +434,7 @@ function useLedgerStore() {
         return () => { cancelled = true; };
     }, [transactions, Boolean(cloud)]);
 
-    return { agencies, transactions, activity, reverse, reconcile, restoreBackup, add, addAgency, deactivateAgency, deleteAgency, restoreAgency, updateAgency, deleteTransaction, updateTransaction, setArchived };
+    return { agencies, transactions, activity, migrate, reverse, reconcile, restoreBackup, add, addAgency, deactivateAgency, deleteAgency, restoreAgency, updateAgency, deleteTransaction, updateTransaction, setArchived };
 }
 
 const navItems: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
@@ -440,6 +460,9 @@ export default function App() {
     const cloud = useCloudLedger();
     const [page, setPage] = useState<Page>("dashboard");
     const [form, setForm] = useState<FormMode>(null);
+    const [refundSource, setRefundSource] = useState<Transaction | null>(null);
+    const [migrationSource, setMigrationSource] = useState<Transaction | null>(null);
+    const [migrationInfo, setMigrationInfo] = useState<Transaction["migration"] | null>(null);
     const [selectedAgency, setSelectedAgency] = useState("agency-1");
     const [lastCredit, setLastCredit] = useState<Transaction | null>(null);
     const [toasts, setToasts] = useState<Toast[]>([]);
@@ -453,6 +476,7 @@ export default function App() {
         id: string;
         label: string;
     } | null>(null);
+    const visible = activeLedgerRecords(store.agencies, store.transactions);
     const pending = store.transactions.filter(
         (t) => t.status === "pending" || t.status === "failed",
     ).length;
@@ -519,12 +543,25 @@ export default function App() {
         setForm("agency");
     };
     const openEditTransaction = (transaction: Transaction) => {
+        if (isTaxRefund(transaction)) {
+            setRefundSource(transaction);
+            return;
+        }
         setEditingTransaction(transaction);
         setForm(transaction.type === "sale" ? "sale" : "payment");
     };
     const title = navItems.find((n) => n.id === page)?.label || "Dashboard";
     return (
         <ToastContext.Provider value={pushToast}>
+        <MigrationContext.Provider value={{start:setMigrationSource,refund:t=>setRefundSource(store.transactions.find(record=>record.id===t.id) || t),details:setMigrationInfo,transactions:store.transactions}}>
+            {refundSource && <TaxRefundForm source={refundSource} onClose={()=>setRefundSource(null)} onSave={async refund=>{
+                const current = store.transactions.find(t=>t.id===refundSource.id);
+                if (!sameRecord(current, refundSource)) throw Error("This entry changed. Close and reopen the refund form.");
+                if (isTaxRefund(refundSource)) await store.updateTransaction(refund);
+                else await store.add(refund);
+            }} />}
+            {migrationSource && <MigrationForm source={migrationSource} agencies={store.agencies} onClose={()=>setMigrationSource(null)} onSave={store.migrate} />}
+            {migrationInfo && <MigrationDetails migration={migrationInfo} agencies={store.agencies} transactions={store.transactions} onClose={()=>setMigrationInfo(null)} />}
         <div className={`app-shell${mobileNavOpen ? " show-mobile-nav" : ""}`}>
             <button
                 type="button"
@@ -655,15 +692,15 @@ export default function App() {
                     )}
                     {page === "dashboard" && (
                         <Dashboard
-                            agencies={store.agencies}
-                            transactions={store.transactions}
+                            agencies={visible.agencies}
+                            transactions={visible.transactions}
                             onNavigate={go}
                         />
                     )}{" "}
                     {page === "agencies" && (
                         <Agencies
-                            agencies={store.agencies.filter((item) => !item.archivedAt)}
-                            transactions={store.transactions}
+                            agencies={visible.agencies}
+                            transactions={visible.transactions}
                             onAdd={() => {
                                 setEditingAgency(null);
                                 setForm("agency");
@@ -682,8 +719,8 @@ export default function App() {
                     )}{" "}
                     {page === "sales" && (
                         <SalesPage
-                            agencies={store.agencies}
-                            transactions={store.transactions.filter(t => !t.archivedAt)}
+                            agencies={visible.agencies}
+                            transactions={visible.transactions}
                             onAdd={store.add}
                             online={online}
                             onArchive={archiveTransaction}
@@ -696,8 +733,8 @@ export default function App() {
                     )}{" "}
                     {page === "payments" && (
                         <PaymentPage
-                            agencies={store.agencies}
-                            transactions={store.transactions.filter(t => !t.archivedAt)}
+                            agencies={visible.agencies}
+                            transactions={visible.transactions}
                             onAdd={store.add}
                             online={online}
                             onArchive={archiveTransaction}
@@ -710,8 +747,8 @@ export default function App() {
                     )}{" "}
                     {page === "ledger" && (
                         <LedgerPage
-                            agencies={store.agencies}
-                            transactions={store.transactions}
+                            agencies={visible.agencies}
+                            transactions={visible.transactions}
                             selected={selectedAgency}
                             setSelected={setSelectedAgency}
                             onAddSale={() => setForm("sale")}
@@ -725,8 +762,8 @@ export default function App() {
                     )}{" "}
                     {page === "reports" && (
                         <Reports
-                            agencies={store.agencies}
-                            transactions={store.transactions}
+                            agencies={visible.agencies}
+                            transactions={visible.transactions}
                             onEdit={openEditTransaction}
                             onDelete={(id) => {
                                 const tx = store.transactions.find((item) => item.id === id);
@@ -823,6 +860,7 @@ export default function App() {
             <ToastStack toasts={toasts} />
             <MobileNav page={page} go={go} closeMobileNav={closeMobileNav} />
         </div>
+        </MigrationContext.Provider>
         </ToastContext.Provider>
     );
 }
@@ -977,8 +1015,8 @@ function Dashboard({
                     <div className="activity-list">
                         {transactions
                             .slice()
-                            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-                            .slice(0, 4)
+                            .sort(compareLedgerEntries)
+                            .slice(-4)
                             .map((t) => (
                                 <ActivityRow
                                     key={t.id}
@@ -1054,6 +1092,7 @@ function ActivityRow({ tx, agency }: { tx: Transaction; agency: Agency }) {
                     {agency.name} · {tx.voucher}
                 </span>
             </div>
+            <MigrationTag transaction={tx} />
             <div className="activity-amount">
                 <b className={tx.type === "sale" ? "debit" : "credit"}>
                     {tx.type === "sale" ? "+" : "-"}
@@ -1064,6 +1103,19 @@ function ActivityRow({ tx, agency }: { tx: Transaction; agency: Agency }) {
         </div>
     );
 }
+function AgencyContactButtons({ agency }: { agency: Agency }) {
+    const links = agencyContactLinks(agency.phone || "");
+    return <span className="agency-contact-buttons">
+        {links ? <>
+            <a className="outline-button" href={links.call} aria-label={`Call ${agency.name}`}><Phone size={14} /> Call</a>
+            <a className="outline-button" href={links.whatsapp} target="_blank" rel="noopener noreferrer" aria-label={`WhatsApp ${agency.name}`}><MessageCircle size={14} /> WhatsApp</a>
+        </> : <>
+            <button className="outline-button" disabled title="Add a valid phone number in Edit agency"><Phone size={14} /> Call</button>
+            <button className="outline-button" disabled title="Add a valid phone number in Edit agency"><MessageCircle size={14} /> WhatsApp</button>
+        </>}
+    </span>;
+}
+
 function AgencyBalanceTable({
     rows,
 }: {
@@ -1084,7 +1136,7 @@ function AgencyBalanceTable({
                         <b>{agency.name}</b>
                     </span>
                     <span className="muted-code">{agency.code}</span>
-                    <span className="muted-code">{agency.contact}</span>
+                    <span className="muted-code">{agency.contact}<AgencyContactButtons agency={agency} /></span>
                     <span className="balance-cell">
                         <b>{money(Math.abs(balance))}</b>
                         <em>{balanceMeta(balance).side}</em>
@@ -1154,6 +1206,7 @@ function Agencies({
                 <div className="agency-grid">
                     {shown.map((agency) => {
                         const balance = getBalance(agency, transactions);
+                        const agencyProfit = profitSummary(transactions.filter(t=>t.agencyId===agency.id),transactions);
                         return (
                             <div className={`agency-card ${!agency.active ? "inactive" : ""}`} key={agency.id}>
                                 <div className="agency-card-top">
@@ -1162,7 +1215,8 @@ function Agencies({
                                     <button className="icon-button" title="Deactivate agency" onClick={() => agency.active && onDeactivate(agency.id)}><MoreHorizontal size={18} /></button>
                                 </div>
                                 <div className="agency-detail"><span><Users size={14} /> {agency.contact}</span><span><Activity size={14} /> {agency.phone}</span></div>
-                                <div className="agency-card-bottom"><div><small>Current balance</small><b className={balance < 0 ? "orange-text" : ""}>{money(balanceMeta(balance).value)} <em>{balanceMeta(balance).side}</em></b></div><div className="agency-actions"><button className="outline-button" onClick={() => onSelect(agency.id)}>View Ledger <ChevronRight size={14} /></button><button className="outline-button" onClick={() => onEdit(agency)}>Edit</button><button className="danger-button" onClick={() => onDelete(agency.id)}>Archive</button></div></div>
+                                <div className="agency-detail"><span>Total profit / loss</span><b>{agencyProfit.total<0?"-":""}{money(agencyProfit.total)}</b>{agencyProfit.missingCosts>0&&<small>Partial: {agencyProfit.missingCosts} missing costs</small>}</div>
+                                <div className="agency-card-bottom"><div><small>Current balance</small><b className={balance < 0 ? "orange-text" : ""}>{money(balanceMeta(balance).value)} <em>{balanceMeta(balance).side}</em></b></div><div className="agency-actions"><AgencyContactButtons agency={agency} /><button className="outline-button" onClick={() => onSelect(agency.id)}>View Ledger <ChevronRight size={14} /></button><button className="outline-button" onClick={() => onEdit(agency)}>Edit</button><button className="danger-button" onClick={() => onDelete(agency.id)}>Archive</button></div></div>
                                 {!agency.active && <span className="inactive-badge">Inactive</span>}
                             </div>
                         );
@@ -1280,6 +1334,7 @@ function OriginalAgencies({
                                         <Activity size={14} /> {a.phone}
                                     </span>
                                 </div>
+                                <AgencyContactButtons agency={a} />
                                 <div className="agency-card-bottom">
                                     <div>
                                         <small>Current balance</small>
@@ -1460,7 +1515,8 @@ function ArchivePage({
     onRestoreTransaction: (id: string) => void;
 }) {
     const archivedAgencies = agencies.filter((a) => a.archivedAt);
-    const archivedTransactions = transactions.filter((t) => t.archivedAt);
+    const archivedAgencyIds = new Set(archivedAgencies.map(agency => agency.id));
+    const archivedTransactions = transactions.filter((t) => t.archivedAt || archivedAgencyIds.has(t.agencyId));
     const agencyPageSize = 12;
     const transactionPageSize = 25;
     const [agencyPage, setAgencyPage] = useState(1);
@@ -1480,7 +1536,7 @@ function ArchivePage({
             <div className="panel-heading">
                 <div>
                     <h2>Archived entries</h2>
-                    <p>Archived records remain in balances, ledgers, and financial reports. Restore returns them to active lists.</p>
+                    <p>Archived records appear here and are excluded from active lists, balances, reports and ledger PDFs. Restore an entry to include it again; entries belonging to an archived agency require restoring that agency too.</p>
                 </div>
             </div>
             {empty && <p className="archive-empty">No archived entries.</p>}
@@ -1495,6 +1551,7 @@ function ArchivePage({
                                     {agency.code} · Archived {formatAuditTime(agency.archivedAt!)}
                                 </small>
                             </span>
+                            <AgencyContactButtons agency={agency} />
                             <button className="outline-button" onClick={() => onRestoreAgency(agency.id)}>
                                 <RotateCcw size={14} /> Restore
                             </button>
@@ -1560,7 +1617,8 @@ function TransactionTable({
                                 : t.method || "Payment"}
                         </b>
                         <small>{t.type === "sale" ? t.ticket : t.reference}</small>
-                        {t.type === "sale" && !t.reversalOf && <small>{ticketProfit(t) === null ? "Profit: cost not recorded" : `Ticket cost: ${money(t.ticketCost!)} | Profit: ${ticketProfit(t)! < 0 ? "-" : ""}${money(ticketProfit(t)!)}`}</small>}
+                        <MigrationTag transaction={t} />
+                        {t.type === "sale" && !t.reversalOf && !outgoingMigration(t) && <small>{ticketProfit(t) === null ? "Profit: cost not recorded" : `Ticket cost: ${money(t.ticketCost!)} | Profit: ${ticketProfit(t)! < 0 ? "-" : ""}${money(ticketProfit(t)!)}`}</small>}
                     </span>
                     <span className="debit">
                         {t.type === "sale" ? money(t.amount) : "—"}
@@ -1601,16 +1659,7 @@ function TransactionTable({
                                     <Download size={15} /> Download Receipt
                                 </button>
                             )}
-                            {onEdit && !t.archivedAt && (
-                                <button className="outline-button" onClick={() => onEdit(t)}>
-                                    Edit
-                                </button>
-                            )}
-                            {onDelete && !t.archivedAt && (
-                                <button className="danger-button" onClick={() => onDelete(t.id)}>
-                                    Archive
-                                </button>
-                            )}
+                            {!t.archivedAt && (onEdit || onDelete || onArchive) && <TransactionActionMenu transaction={t} onEdit={onEdit} onArchive={onDelete || onArchive} />}
                         </span>
                     )}
                 </div>
@@ -1638,11 +1687,7 @@ function SyncBadge({ status }: { status: SyncStatus }) {
 }
 
 const printDate = (value: string) => new Date(`${value}T00:00:00`).toLocaleDateString("en-GB");
-const pdfDate = (value: string) => value.split("-").reverse().join("-");
-const transactionPdfNarration = (transaction: Transaction, agency: Agency) =>
-    transaction.type === "sale"
-        ? transaction.reversalOf ? transaction.narration || "Reversal" : `Ref No : ${transaction.reference || "-"}, Ticket No. ${transaction.ticket || "-"} Sector: ${transaction.sector || "-"}, Voucher No. ${transaction.voucher} to ${agency.name} on ${pdfDate(transaction.date)}, Flight Date : ${transaction.flightDate ? pdfDate(transaction.flightDate) : "-"}, Pax Name : ${transaction.passenger || "-"}, Ticket sales amount: BDT ${(transaction.amount / 100).toFixed(2)}`
-        : transaction.narration || "Payment received";
+
 
 function downloadAgencyDirectoryPdf(agencies: Agency[], transactions: Transaction[]) {
     const pdf = new jsPDF({ unit: "mm", format: "a4" });
@@ -1688,7 +1733,7 @@ function ledgerStatementData(agency: Agency, rows: { t: Transaction; running: nu
         rows: rows.map(({ t, running }) => ({
             date: t.date,
             voucher: t.voucher,
-            narration: transactionPdfNarration(t, agency),
+            narration: transactionLedgerNarration(t, agency),
             method: t.method || "",
             debit: t.type === "sale" ? t.amount : 0,
             credit: t.type === "payment" ? t.amount : 0,
@@ -1860,9 +1905,10 @@ async function downloadCreditReceiptPdf(agency: Agency, data: { date: string; vo
 }
 
 function LedgerProfit({ transaction }: { transaction: Transaction }) {
+    if (isTaxRefund(transaction)) return <span className="ledger-profit"><b>-{money(transaction.amount)}</b><small>Tax refund</small></span>;
     const profit = ticketProfit(transaction);
     return <span className="ledger-profit" title="Profit margin = profit / ticket sales amount x 100">
-        {transaction.type !== "sale" || transaction.reversalOf ? "—" : profit === null ? <small>Cost not recorded</small> : <>
+        {transaction.type !== "sale" || transaction.reversalOf || outgoingMigration(transaction) ? "—" : profit === null ? <small>Cost not recorded</small> : <>
             <b>{profit < 0 ? "-" : ""}{money(profit)}</b>
             <small>{((profit / transaction.amount) * 100).toFixed(2)}% margin</small>
         </>}
@@ -2017,19 +2063,17 @@ function LedgerPage({
                                 <span>{printDate(t.date)}</span>
                                 <span>
                                     <b>{t.voucher}{t.archivedAt ? " · Archived" : ""}</b>
-                                    <small>
-                                        {t.narration ||
-                                            t.passenger ||
-                                            (t.type === "payment" ? "Payment received" : "Ticket sale")}
+                                    <small className="ledger-description">
+                                        {transactionLedgerNarration(t, agency)}
                                     </small>
-                                    {t.type === "sale" && !t.reversalOf && <small>Ticket sales amount: {money(t.amount)}</small>}
 
                                 </span>
                                 <span>{t.method || "—"}</span>
-                                <span className="debit">
+                                <span className="debit ledger-amount">
                                     {t.type === "sale" ? money(t.amount) : "—"}
+                                    {t.type === "sale" && <MigrationTag transaction={t} />}
                                 </span>
-                                <span className="credit">
+                                <span className="credit ledger-amount">
                                     {t.type === "payment" ? money(t.amount) : "—"}
                                     {t.type === "payment" && (
                                         <button
@@ -2053,15 +2097,11 @@ function LedgerPage({
                                             <Download size={12} />
                                         </button>
                                     )}
+                                    {t.type === "payment" && <MigrationTag transaction={t} />}
                                 </span>
                                 <LedgerProfit transaction={t} />
                                 <span className="ledger-row-actions">
-                                    <button className="ledger-row-action" disabled={Boolean(t.archivedAt)} onClick={() => onEdit(t)}>
-                                        Edit
-                                    </button>
-                                    <button className="ledger-row-action danger" onClick={() => onDelete(t.id)}>
-                                        Archive
-                                    </button>
+                                    <TransactionActionMenu transaction={t} onEdit={onEdit} onArchive={onDelete} />
                                 </span>
                             </div>
                         ))}
@@ -2355,7 +2395,9 @@ function ModalShell({
     subtitle,
     children,
     onClose,
+    className = "",
 }: {
+    className?: string;
     title: string;
     subtitle: string;
     children: React.ReactNode;
@@ -2363,13 +2405,13 @@ function ModalShell({
 }) {
     return (
         <div className="modal-backdrop">
-            <div className="modal">
+            <div className={`modal ${className}`} role="dialog" aria-modal="true" aria-label={title}>
                 <div className="modal-head">
                     <div>
                         <h2>{title}</h2>
                         <p>{subtitle}</p>
                     </div>
-                    <button className="icon-button" onClick={onClose}>
+                    <button type="button" className="icon-button" aria-label="Close dialog" onClick={onClose}>
                         <X size={19} />
                     </button>
                 </div>
@@ -2935,7 +2977,7 @@ function ActivityLog({ events, agencies }: { events: AuditEvent[]; agencies: Age
         <div className="panel-heading"><div><h2>Activity Log</h2><p>{filtered.length} matching changes · Bangladesh time (UTC+06:00)</p></div></div>
         <div className="audit-filters">
             <input aria-label="Search activity log" placeholder="Search voucher, agency or changed value" value={query} onChange={event => setQuery(event.target.value)} />
-            <select aria-label="Filter activity" value={action} onChange={event => setAction(event.target.value)}><option value="">All actions</option>{["create", "edit", "archive", "restore", "delete", "deactivate", "import", "reverse", "reconcile", "unreconcile"].map(item => <option key={item} value={item}>{item}</option>)}</select>
+            <select aria-label="Filter activity" value={action} onChange={event => setAction(event.target.value)}><option value="">All actions</option>{["create", "edit", "archive", "restore", "delete", "deactivate", "import", "reverse", "reconcile", "unreconcile", "migrate"].map(item => <option key={item} value={item}>{item}</option>)}</select>
         </div>
         <p className="audit-note">History starts when this feature is enabled. Older actions cannot be reconstructed. {firebaseServices ? "Cloud actions use the authenticated account and server timestamps. Imported local history is marked unverified." : "This log is stored in this browser; users are not authenticated."}</p>
         {filtered.length === 0 && <p className="archive-empty">No matching activity.</p>}
@@ -2946,4 +2988,157 @@ function ActivityLog({ events, agencies }: { events: AuditEvent[]; agencies: Age
         </details>)}
         <Pagination page={page} pageCount={pageCount} onPageChange={setPage} />
     </section>;
+}
+
+const MigrationContext = createContext<{start:(t:Transaction)=>void;refund:(t:Transaction)=>void;details:(m:NonNullable<Transaction['migration']>)=>void;transactions:Transaction[]}>({start:()=>{},refund:()=>{},details:()=>{},transactions:[]});
+function MigrationTag({transaction:t,allowStart=false}:{transaction:Transaction;allowStart?:boolean}) {
+ const context=useContext(MigrationContext);
+ if(t.migration)return <button type="button" className="migration-tag" onClick={()=>context.details(t.nextMigration || t.migration!)}>Migration history</button>;
+ if(!allowStart||t.type!=='sale'||t.archivedAt||t.reversalOf||context.transactions.some(x=>x.reversalOf===t.id))return null;
+ return <button type="button" className="outline-button" onClick={()=>context.start(t)}>Migrate</button>;
+}
+function MigrationRoute({from,to}:{from:string;to:string}) {
+ return <div className="migration-route">
+  <div><span className="migration-eyebrow">From agency</span><strong><Building2 size={16}/>{from}</strong></div>
+  <span className="migration-route-arrow" aria-hidden="true"><ArrowUpRight size={20}/></span>
+  <div><span className="migration-eyebrow">To agency</span><strong><Building2 size={16}/>{to}</strong></div>
+ </div>;
+}
+function MigrationHistory({history,agencies}:{history:Transaction[];agencies:Agency[]}) {
+ const cost=history[0]?.ticketCost;
+ return <section className="migration-ticket"><h3><Ticket size={16}/> Ticket price history</h3>
+  <dl className="migration-price-history">
+   <div><dt>Original purchase price</dt><dd>{cost===undefined?"Cost not recorded":money(cost)}</dd></div>
+   {history.map((entry,index)=><div key={entry.id}><dt>{index+1}. {agencies.find(a=>a.id===entry.agencyId)?.name||entry.agencyId}<small>{entry.date} ? {entry.ticket}</small></dt><dd>{money(entry.amount)}{index===history.length-1&&<small>Current sale</small>}</dd></div>)}
+  </dl>
+ </section>;
+}
+function MigrationTotals({purchasePrice,sellingPrice}:{purchasePrice:number|undefined;sellingPrice:number|null}) {
+ const profit=sellingPrice===null||purchasePrice===undefined?null:sellingPrice-purchasePrice;
+ return <div className="migration-totals" aria-live="polite">
+  <div><span>Original purchase price</span><strong>{purchasePrice===undefined?"Unknown":money(purchasePrice)}</strong><small>Ticket buying cost ? BDT</small></div>
+  <div><span>Final selling price</span><strong>{sellingPrice===null?"?":money(sellingPrice)}</strong><small>Current destination agency ? BDT</small></div>
+  <div className={"migration-profit"+(profit!==null&&profit<0?" is-loss":"")}><span>{profit!==null&&profit<0?"Total loss":"Total profit"}</span><strong>{profit===null?"?":(profit<0?"-":"")+money(profit)}</strong><small>{purchasePrice===undefined?"Cost not recorded":sellingPrice===null?"Enter a selling price":"Final selling price ? original purchase price"}</small></div>
+ </div>;
+}
+function MigrationDetails({migration:m,agencies,transactions,onClose}:{migration:NonNullable<Transaction['migration']>;agencies:Agency[];transactions:Transaction[];onClose:()=>void}) {
+ const source=transactions.find(t=>t.id===m.sourceId),sale=transactions.find(t=>t.id===m.saleId);
+ const history=source?ticketHistory(source,transactions):[];
+ const latest=history[history.length-1];
+ return <ModalShell className="migration-modal" title="Ticket migration details" subtitle="A complete summary of this agency transfer" onClose={onClose}>
+  <div className="migration-body">
+   <div className="migration-status"><span><Check size={14}/> Migration saved</span><time>{formatAuditTime(m.createdAt)}</time></div>
+   <MigrationRoute from={agencies.find(a=>a.id===m.fromAgencyId)?.name||m.fromAgencyId} to={agencies.find(a=>a.id===m.toAgencyId)?.name||m.toAgencyId}/>
+   <div className="migration-ticket-grid">
+    <section className="migration-ticket"><h3><Ticket size={16}/> Original ticket</h3><dl><div><dt>Ticket number</dt><dd>{source?.ticket||'—'}</dd></div><div><dt>Passenger</dt><dd>{source?.passenger||'—'}</dd></div></dl></section>
+    <section className="migration-ticket"><h3><Ticket size={16}/> Destination ticket</h3><dl><div><dt>Ticket number</dt><dd>{sale?.ticket||'—'}</dd></div><div><dt>Passenger</dt><dd>{sale?.passenger||'—'}</dd></div></dl></section>
+   </div>
+   <dl className="migration-metadata"><div><dt>Reference</dt><dd>{sale?.reference||'—'}</dd></div><div><dt>Sector / route</dt><dd>{sale?.sector||'—'}</dd></div><div><dt>Posting date</dt><dd>{sale?.date||'—'}</dd></div><div><dt>Flight date</dt><dd>{sale?.flightDate||'—'}</dd></div></dl>
+   <MigrationHistory history={history} agencies={agencies}/>
+   <MigrationTotals purchasePrice={history[0]?.ticketCost} sellingPrice={latest?.amount??null}/>
+   <p className="migration-note">Profit is counted once under the current agency. Earlier sales remain in this history.</p>
+  </div>
+  <div className="form-footer migration-details-footer"><span><ShieldCheck size={14}/> Linked agency entries</span><button type="button" className="outline-button" onClick={onClose}>Done</button></div>
+ </ModalShell>;
+}
+function MigrationForm({source,agencies,onClose,onSave}:{source:Transaction;agencies:Agency[];onClose:()=>void;onSave:(r:MigrationRequest)=>Promise<void>}) {
+ const [operationId]=useState(()=>crypto.randomUUID());
+ const {transactions}=useContext(MigrationContext);
+ const original=transactions.find(t=>t.id===source.id)||source;
+ const history=ticketHistory(original,transactions);
+ const purchasePrice=originalTicketCost(original,transactions);
+ const [data,setData]=useState({agencyId:agencies.find(a=>a.id!==source.agencyId&&a.active&&!a.archivedAt)?.id||'',date:getToday()<source.date?source.date:getToday(),ticket:source.ticket||'',passenger:'',reference:'',sector:source.sector||'',flightDate:source.flightDate||'',amount:'',narration:''});
+ const safety=useFormSafety(data,onClose),notify=useContext(ToastContext);
+ const set=(key:string,value:string)=>setData(d=>({...d,[key]:value}));
+ let sellingPrice:number|null=null;try{sellingPrice=parseMoney(data.amount)}catch{}
+ const submit=async()=>{if(!safety.start())return;try{
+  await onSave({sourceId:source.id,sourcePrice:source.amount,operationId,destination:{...data,type:'sale',amount:parseMoney(data.amount),voucher:'V-'+operationId}});
+  notify('success','Migration saved. Source credited and destination debited.');onClose();
+ }catch(error){safety.fail(error);notify('error',error instanceof Error?error.message:'Unable to migrate ticket.')}finally{safety.finish()}};
+ return <ModalShell className="migration-modal" title="Migrate ticket" subtitle="Set the destination agency, passenger details and selling price" onClose={safety.close}>
+ <div className="migration-body migration-form-intro">
+  <MigrationRoute from={agencies.find(a=>a.id===source.agencyId)?.name||source.agencyId} to={agencies.find(a=>a.id===data.agencyId)?.name||'Select destination'}/>
+  <p className="migration-note"><ShieldCheck size={16}/> Final profit is counted once under the destination agency and included in the main dashboard.</p>
+   <MigrationHistory history={history} agencies={agencies}/>
+ </div>
+ {safety.error&&<p className="form-save-error" role="alert">{safety.error}</p>}
+ <div className="form-grid migration-form-grid"><h3 className="migration-section-title"><Building2 size={16}/> Transfer details</h3><Field label="Destination agency" required><select value={data.agencyId} onChange={e=>set('agencyId',e.target.value)}><option value="">Select agency</option>{agencies.filter(a=>a.active&&a.id!==source.agencyId).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+ <Field label="Posting date" required><input type="date" value={data.date} min={source.date} onChange={e=>set('date',e.target.value)}/></Field>
+ <h3 className="migration-section-title"><Ticket size={16}/> Ticket &amp; passenger</h3>
+ <Field label="Ticket number" required><input placeholder="Ticket number" value={data.ticket} onChange={e=>set('ticket',e.target.value)}/></Field>
+ <Field label="New passenger name" required><input placeholder="Passenger full name" value={data.passenger} onChange={e=>set('passenger',e.target.value)}/></Field>
+ <Field label="Reference"><input value={data.reference} onChange={e=>set('reference',e.target.value)}/></Field>
+ <Field label="Sector / route"><input value={data.sector} onChange={e=>set('sector',e.target.value)}/></Field>
+ <Field label="Flight date"><input type="date" value={data.flightDate} onChange={e=>set('flightDate',e.target.value)}/></Field>
+ <Field label="Selling price (BDT)" required><input type="number" min="0.01" step="0.01" value={data.amount} onChange={e=>set('amount',e.target.value)}/></Field>
+
+ <Field label="Notes / narration"><input placeholder="Optional notes about this transfer" value={data.narration} onChange={e=>set('narration',e.target.value)}/></Field></div>
+ <div className="migration-summary"><MigrationTotals purchasePrice={purchasePrice} sellingPrice={sellingPrice}/></div>
+ <FormFooter savingOverride={safety.busy} onClose={safety.close} onSave={submit} offline={!navigator.onLine}/></ModalShell>;
+}
+
+function TransactionActionMenu({transaction:t,onEdit,onArchive}:{transaction:Transaction;onEdit?:(t:Transaction)=>void;onArchive?:(id:string)=>void}) {
+ const cloud=useCloudLedger();
+ const context=useContext(MigrationContext),trigger=useRef<HTMLButtonElement>(null),panel=useRef<HTMLDivElement>(null);
+ const [position,setPosition]=useState<{left:number;top:number}|null>(null);
+ const locked=Boolean(t.archivedAt||t.migration||t.reversalOf||t.reconciliation||context.transactions.some(x=>x.reversalOf===t.id));
+ const close=()=>{setPosition(null);trigger.current?.focus()};
+ useEffect(()=>{
+  if(!position)return;
+  panel.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+  const outside=(e:PointerEvent)=>{if(e.target instanceof Node&&!panel.current?.contains(e.target)&&!trigger.current?.contains(e.target))setPosition(null)};
+  const key=(e:KeyboardEvent)=>{if(e.key==='Escape'){e.preventDefault();close()}};
+  const move=()=>setPosition(null);
+  document.addEventListener('pointerdown',outside);document.addEventListener('keydown',key);window.addEventListener('resize',move);window.addEventListener('scroll',move,true);
+  return()=>{document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',key);window.removeEventListener('resize',move);window.removeEventListener('scroll',move,true)};
+ },[position]);
+ const choose=(action:()=>void)=>{close();action()};
+ return <><button ref={trigger} type="button" className="icon-button transaction-menu-trigger" aria-label={`Actions for ${t.voucher}`} aria-haspopup="menu" aria-expanded={Boolean(position)} onClick={()=>{if(position){close();return}const rect=trigger.current!.getBoundingClientRect();setPosition({left:Math.max(8,Math.min(rect.right-160,window.innerWidth-168)),top:rect.bottom+190>window.innerHeight?Math.max(8,rect.top-186):rect.bottom+4})}}><MoreHorizontal size={19}/></button>
+ {position&&createPortal(<div ref={panel} role="menu" aria-label={`Actions for ${t.voucher}`} className="transaction-action-menu" style={{left:position.left,top:position.top}} onBlur={e=>{if(e.relatedTarget instanceof Node&&!e.currentTarget.contains(e.relatedTarget)&&e.relatedTarget!==trigger.current)setPosition(null)}} onKeyDown={e=>{if(!['ArrowDown','ArrowUp','Home','End'].includes(e.key))return;e.preventDefault();const buttons=Array.from(panel.current!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));if(!buttons.length)return;const index=buttons.indexOf(document.activeElement as HTMLButtonElement);const next=e.key==='Home'?0:e.key==='End'?buttons.length-1:(index+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length;buttons[next].focus()}}>
+ <button role="menuitem" disabled={locked||!onEdit} onClick={()=>choose(()=>onEdit?.(t))}>Edit</button>
+ <button role="menuitem" title={cloud&&t.migration?"Further migration is unavailable for cloud accounts":undefined} disabled={Boolean((cloud&&t.migration)||t.archivedAt||outgoingMigration(t)||t.reversalOf||t.reconciliation||context.transactions.some(x=>x.reversalOf===t.id))||t.type!=='sale'} onClick={()=>choose(()=>context.start(t))}>Migrate</button>
+ {t.type === 'sale' && <button role="menuitem" onClick={()=>choose(()=>context.refund(t))}>Tax Refund</button>}
+ <button role="menuitem" className="danger" disabled={Boolean(t.archivedAt||t.migration)||!onArchive} onClick={()=>choose(()=>onArchive?.(t.id))}>Archive</button>
+ </div>,document.body)}</>;
+}
+
+function TaxRefundForm({source,onClose,onSave}:{source:Transaction;onClose:()=>void;onSave:(refund:Transaction)=>void|Promise<void>}) {
+    const editing = isTaxRefund(source);
+    const [recordId] = useState(()=>editing ? source.id : id("tax-refund"));
+    const [voucher] = useState(()=>editing ? source.voucher : createVoucher("RC",getToday()));
+    const [data,setData] = useState({
+        amount: editing ? String(source.amount / 100) : "",
+        date: editing ? source.date : (getToday() < source.date ? source.date : getToday()),
+    });
+    const safety = useFormSafety(data,onClose);
+    const notify = useContext(ToastContext);
+    const submit = async () => {
+        if (!safety.start()) return;
+        try {
+            if (!editing && data.date < source.date) throw Error("Refund date cannot precede the debit entry.");
+            const refund: Transaction = editing ? {...source,amount:parseMoney(data.amount),date:data.date} : {
+                id:recordId,voucher,type:"payment",agencyId:source.agencyId,
+                amount:parseMoney(data.amount),date:data.date,method:"Tax Refund",
+                narration:"Tax Return",reference:source.voucher,
+                ticket:source.ticket,passenger:source.passenger,
+                status:"pending",createdAt:new Date().toISOString(),
+            };
+            await onSave(refund);
+            notify("success",editing ? "Tax refund updated." : "Tax refund added to credit and deducted from profit.");
+            onClose();
+        } catch (error) {
+            safety.fail(error);
+            notify("error",error instanceof Error ? error.message : "Unable to save tax refund.");
+        } finally { safety.finish(); }
+    };
+    return <ModalShell title={editing ? "Edit Tax Refund" : "Tax Refund"} subtitle="The refund increases agency credit and reduces profit by the same amount." onClose={safety.close}>
+        {safety.error && <p className="form-save-error" role="alert">{safety.error}</p>}
+        <div className="form-grid">
+            <Field label="Refund amount (BDT)" required><input autoFocus type="number" min="0.01" step="0.01" value={data.amount} onChange={e=>setData({...data,amount:e.target.value})}/></Field>
+            <Field label="Posting date" required><input type="date" min={editing ? undefined : source.date} value={data.date} onChange={e=>setData({...data,date:e.target.value})}/></Field>
+            <Field label="Narration"><input value="Tax Return" readOnly/></Field>
+            <Field label="Ticket / reference"><input value={source.ticket || source.reference || source.voucher} readOnly/></Field>
+        </div>
+        <FormFooter savingOverride={safety.busy} onClose={safety.close} onSave={submit} offline={!navigator.onLine}/>
+    </ModalShell>;
 }

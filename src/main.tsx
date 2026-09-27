@@ -5,6 +5,7 @@ import FirebaseGate from "./FirebaseGate";
 
 import "./styles.css";
 import "./dark.css";
+import "./migration.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -48,3 +48,44 @@ npm run test:integration
 ```
 
 Emulator tests require Java 21. On this Windows machine use NODE_OPTIONS=--dns-result-order=ipv4first if discovery fails. Only Auth and Firestore emulators are needed. tests/browser-cloud.mjs verifies actual login and direct Firestore restore/match/close/reverse/reload flows; it requires Playwright and the two emulators.
+
+## Password recovery
+
+The login screen links to /forgot-password. The /reset-password page verifies
+Firebase's emailed oobCode before accepting a new password. Signup is not offered.
+
+After deploying the app:
+1. Firebase Console > Authentication > Settings > Authorized domains:
+   add localhost and atoz.htbyte.com (no scheme, port, or path).
+2. Authentication > Templates > Password reset > Customize action URL:
+   https://atoz.htbyte.com/reset-password
+3. For local-only testing, temporarily use http://localhost:5173/reset-password
+   as the action URL, then restore the production URL. This is a project setting,
+   not automatically selected by the requesting browser.
+4. Test with a real reset email. Expired or reused links must be rejected.
+
+The sendPasswordResetEmail continue URL returns to the requesting app's origin;
+it does not set the email action handler URL. Firebase may share the customized
+action URL with other email templates; this page supports password reset only.
+Firebase Hosting and Vercel rewrites serve both recovery routes. Other hosts must
+also serve index.html for these paths.
+
+## Shared ledger administrators
+
+robinmia459@gmail.com and sohag02.c@gmail.com share ledger
+VSTQMEI4HsZQoUcaZ1szxGlOfc32. Both ledgers were empty when checked before setup.
+The accounts keep separate logins. No records need to be moved or merged.
+
+Deploy the updated frontend and Firestore rules before issuing the shared claims:
+
+    node scripts/grant-access.mjs robinmia459@gmail.com robins-e3132 --cli VSTQMEI4HsZQoUcaZ1szxGlOfc32
+    node scripts/grant-access.mjs sohag02.c@gmail.com robins-e3132 --cli VSTQMEI4HsZQoUcaZ1szxGlOfc32
+
+The helper preserves existing claims and verifies ledgerAccess=true,
+ledgerRole=admin and ledgerId. Sign out and back in after assignment.
+Claims are issued only by the trusted admin helper, never by the browser.
+These admins can perform all supported ledger operations on their assigned
+ledger. Financial validation, closed periods and immutable history still apply.
+Every audit event keeps the authenticated actor's UID and email; ownerUid
+continues to identify the ledger. Reads, writes, migrations, backups, restores
+and recovery copies all use the same assigned ledger ID.

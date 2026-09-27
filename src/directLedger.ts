@@ -3,7 +3,7 @@ import type { User } from 'firebase/auth';
 import type { Agency, Transaction } from './App';
 import type { AuditEvent, LedgerSnapshot } from './history';
 import { validateBackup } from './ledgerControls';
-import { applyMutation } from './shared/ledger-domain.mjs';
+import { applyMutation, applyTicketMigration } from './shared/ledger-domain.mjs';
 export type DirectSnapshot=LedgerSnapshot<Agency,Transaction>&{revision:number};
 const clean=<T>(value:T):T=>JSON.parse(JSON.stringify(value));
 const fingerprint=async(value:unknown)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(value))))).map(b=>b.toString(16).padStart(2,'0')).join('');
@@ -18,9 +18,9 @@ export async function readDirectLedger(db:Firestore,uid:string):Promise<DirectSn
  }
  throw Error('Ledger is changing on another device. Wait briefly and refresh.');
 }
-export async function mutateDirectLedger(db:Firestore,user:Pick<User,'uid'|'email'>,event:AuditEvent,expectedRevision:number):Promise<DirectSnapshot>{
- const root=doc(db,'ledgers',user.uid),audit=doc(root,'activity',event.id),requestHash=await fingerprint({event,expectedRevision});
- const snapshot=await readDirectLedger(db,user.uid);
+export async function mutateDirectLedger(db:Firestore,user:Pick<User,'uid'|'email'>,event:AuditEvent,expectedRevision:number,ledgerId=user.uid):Promise<DirectSnapshot>{
+ const root=doc(db,'ledgers',ledgerId),audit=doc(root,'activity',event.id),requestHash=await fingerprint({event,expectedRevision});
+ const snapshot=await readDirectLedger(db,ledgerId);
  const prior=snapshot.activity.find(e=>e.id===event.id);
  if(!prior&&snapshot.revision!==expectedRevision)throw Error('Ledger changed on another device. Refresh and review your changes.');
  await runTransaction(db,async batch=>{
@@ -34,19 +34,19 @@ export async function mutateDirectLedger(db:Firestore,user:Pick<User,'uid'|'emai
   if(event.action==='reverse')batch.set(doc(root,'reversals',command.id),{originalId:command.id,reversalId:result.after!.id,operationId:event.id});
   batch.set(audit,clean({...result.event,actorUid:user.uid,requestHash}));
   batch.update(audit,{committedAt:serverTimestamp()});
-  batch.set(root,{revision:expectedRevision+1,ownerUid:user.uid,updatedAt:serverTimestamp(),hasClosedPeriods:Boolean(meta.data()?.hasClosedPeriods||result.next.agencies.some(a=>a.closedThrough)),lastOperation:{id:event.id,entity:event.entity,entityId:result.after?.id||event.entityId,action:event.action}});
+  batch.set(root,{revision:expectedRevision+1,ownerUid:ledgerId,updatedAt:serverTimestamp(),hasClosedPeriods:Boolean(meta.data()?.hasClosedPeriods||result.next.agencies.some(a=>a.closedThrough)),lastOperation:{id:event.id,entity:event.entity,entityId:result.after?.id||event.entityId,action:event.action}});
  });
- return readDirectLedger(db,user.uid);
+ return readDirectLedger(db,ledgerId);
 }
-export async function restoreDirectLedger(db:Firestore,user:Pick<User,'uid'|'email'>,input:LedgerSnapshot<Agency,Transaction>,expectedRevision:number,operationId=crypto.randomUUID(),importOnly=false):Promise<DirectSnapshot>{
- const data=validateBackup(input),current=await readDirectLedger(db,user.uid);
- const root=doc(db,'ledgers',user.uid),audit=doc(root,'activity',operationId),requestHash=await fingerprint({data,expectedRevision,importOnly});
+export async function restoreDirectLedger(db:Firestore,user:Pick<User,'uid'|'email'>,input:LedgerSnapshot<Agency,Transaction>,expectedRevision:number,operationId=crypto.randomUUID(),importOnly=false,ledgerId=user.uid):Promise<DirectSnapshot>{
+ const data=validateBackup(input),current=await readDirectLedger(db,ledgerId);
+ const root=doc(db,'ledgers',ledgerId),audit=doc(root,'activity',operationId),requestHash=await fingerprint({data,expectedRevision,importOnly});
  if(current.activity.some(e=>e.id===operationId)){const replay=await getDocFromServer(audit);if(replay.data()?.requestHash!==requestHash)throw Error('Restore operation changed.');return current;}
  if(importOnly&&(current.revision||current.agencies.length||current.transactions.length||current.activity.length))throw Error('Import requires an empty cloud ledger.');
  if(current.revision!==expectedRevision)throw Error('Ledger changed after preview. Preview the backup again.');
  if(current.agencies.some(a=>a.closedThrough))throw Error('Restore cannot overwrite closed periods. Use an empty ledger.');
  if(new TextEncoder().encode(JSON.stringify(current)).length>900000)throw Error('Current ledger exceeds the recovery-copy limit.');
- const reversalDocs=await getDocsFromServer(collection(db,'ledgers',user.uid,'reversals'));
+ const reversalDocs=await getDocsFromServer(collection(db,'ledgers',ledgerId,'reversals'));
  if(current.agencies.length+current.transactions.length+data.agencies.length+data.transactions.length+data.activity.length+reversalDocs.size+data.transactions.filter(t=>t.reversalOf).length>440)throw Error('Restore exceeds the atomic write limit.');
  await runTransaction(db,async batch=>{
   const [meta,replay]=await Promise.all([batch.get(root),batch.get(audit)]);
@@ -60,8 +60,25 @@ export async function restoreDirectLedger(db:Firestore,user:Pick<User,'uid'|'ema
   for(const a of data.agencies)batch.set(doc(root,'agencies',a.id),clean(a));
   for(const t of data.transactions){batch.set(doc(root,'transactions',t.id),clean({...t,status:'synced'}));if(t.reversalOf)batch.set(doc(root,'reversals',t.reversalOf),{originalId:t.reversalOf,reversalId:t.id,operationId});}
   data.activity.forEach((item,index)=>{const id=`restored-${operationId}-${index}`;batch.set(doc(root,'activity',id),clean({...item,id,actor:'Restored backup history (unverified)',actorUid:user.uid,imported:true,importOperation:operationId}));});
-  batch.set(audit,{id:operationId,entity:'ledger',entityId:user.uid,action:importOnly?'import':'restore',label:'JSON backup restored',actor:user.email||user.uid,actorUid:user.uid,timestamp:new Date().toISOString(),before:{agencies:current.agencies.length,transactions:current.transactions.length},after:{agencies:data.agencies.length,transactions:data.transactions.length},requestHash,committedAt:serverTimestamp()});
-  batch.set(root,{revision:expectedRevision+1,ownerUid:user.uid,updatedAt:serverTimestamp(),hasClosedPeriods:data.agencies.some(a=>a.closedThrough),lastOperation:{id:operationId,entity:'ledger',entityId:user.uid,action:importOnly?'import':'restore'}});
+  batch.set(audit,{id:operationId,entity:'ledger',entityId:ledgerId,action:importOnly?'import':'restore',label:'JSON backup restored',actor:user.email||user.uid,actorUid:user.uid,timestamp:new Date().toISOString(),before:{agencies:current.agencies.length,transactions:current.transactions.length},after:{agencies:data.agencies.length,transactions:data.transactions.length},requestHash,committedAt:serverTimestamp()});
+  batch.set(root,{revision:expectedRevision+1,ownerUid:ledgerId,updatedAt:serverTimestamp(),hasClosedPeriods:data.agencies.some(a=>a.closedThrough),lastOperation:{id:operationId,entity:'ledger',entityId:ledgerId,action:importOnly?'import':'restore'}});
  });
- return readDirectLedger(db,user.uid);
+ return readDirectLedger(db,ledgerId);
+}
+
+export type MigrationRequest = {sourceId: string; sourcePrice: number; destination: Partial<Transaction>; operationId: string};
+export async function migrateDirectLedger(db:Firestore,user:Pick<User,'uid'|'email'>,request:MigrationRequest,expectedRevision:number,ledgerId=user.uid):Promise<DirectSnapshot> {
+ const root=doc(db,'ledgers',ledgerId),audit=doc(root,'activity',request.operationId);
+ const requestHash=await fingerprint({request,expectedRevision});
+ const snapshot=await readDirectLedger(db,ledgerId);
+ await runTransaction(db,async batch=>{
+  const [meta,replay]=await Promise.all([batch.get(root),batch.get(audit)]);
+  if(replay.exists()){if(replay.data().requestHash!==requestHash)throw Error('Migration request changed.');return;}
+  if(snapshot.revision!==expectedRevision||(meta.data()?.revision||0)!==expectedRevision)throw Error('Ledger changed. Refresh before migrating.');
+  const result=applyTicketMigration(snapshot,request,user.email||user.uid,new Date().toISOString(),{legacyCloud:true});
+  for(const record of [result.after,result.credit,result.sale])batch.set(doc(root,'transactions',record.id),clean(record));
+  batch.set(audit,{...clean(result.event),actorUid:user.uid,requestHash,committedAt:serverTimestamp()});
+  batch.set(root,{...meta.data(),ownerUid:ledgerId,revision:expectedRevision+1,updatedAt:serverTimestamp(),hasClosedPeriods:Boolean(meta.data()?.hasClosedPeriods),lastOperation:{id:request.operationId,entity:'transaction',entityId:request.sourceId,action:'migrate'}});
+ });
+ return readDirectLedger(db,ledgerId);
 }

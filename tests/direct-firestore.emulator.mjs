@@ -57,3 +57,97 @@ test('ticket cost survives cloud create, edit and reload while debit stays at se
  const reloaded=await readDirectLedger(db,user.uid);
  assert.equal(reloaded.transactions[0].ticketCost,110000);assert.equal(reloaded.transactions[0].amount,120015);
 });
+
+test('ticket migration is atomic, replayable and locked against individual edits',async()=>{
+ const {migrateDirectLedger}=await import('data:text/javascript;base64,'+Buffer.from(compiled).toString('base64'));
+ const {db,user}=session('migration');let snapshot=await mutateDirectLedger(db,user,event('agency','create',null,agency),0);
+ snapshot=await mutateDirectLedger(db,user,event('agency','create',null,{...agency,id:'b',code:'B'}),snapshot.revision);
+ const source={id:'original',agencyId:'a',type:'sale',date:'2026-03-01',amount:5000000,ticketCost:4500000,ticket:'T1',passenger:'Original',voucher:'V1',createdAt:'2026-03-01T01:00:00Z',status:'synced'};
+ snapshot=await mutateDirectLedger(db,user,event('transaction','create',null,source),snapshot.revision);
+ const request={sourceId:source.id,sourcePrice:source.amount,operationId:'migration-one',destination:{agencyId:'b',date:'2026-03-02',amount:5500000,ticket:'T2',passenger:'New passenger',voucher:'V2'}};
+ const revision=snapshot.revision;
+ snapshot=await migrateDirectLedger(db,user,request,revision);
+ assert.equal(snapshot.transactions.length,3);assert.equal(snapshot.revision,revision+1);
+ const sale=snapshot.transactions.find(t=>t.id==='migration-one_sale'),credit=snapshot.transactions.find(t=>t.id==='migration-one_credit');
+ assert.equal(sale.amount,5500000);assert.equal(sale.ticketCost,5000000);assert.equal(credit.amount,5000000);
+ assert.equal((await migrateDirectLedger(db,user,request,revision)).revision,snapshot.revision);
+ await assert.rejects(migrateDirectLedger(db,user,{...request,operationId:'second'},snapshot.revision),/unmigrated/);
+ await assert.rejects(mutateDirectLedger(db,user,event('transaction','archive',sale,{...sale,archivedAt:'2026-03-03T00:00:00Z'}),snapshot.revision),/individually/);
+});
+
+test('security rules reject partial migration and altered paired prices',async()=>{
+ const {applyTicketMigration}=await import('../src/shared/ledger-domain.mjs');
+ const {db,user}=session('migration-attacks');let snapshot=await mutateDirectLedger(db,user,event('agency','create',null,agency),0);
+ snapshot=await mutateDirectLedger(db,user,event('agency','create',null,{...agency,id:'b',code:'B'}),snapshot.revision);
+ const original={id:'original',agencyId:'a',type:'sale',date:'2026-03-01',amount:5000000,ticket:'T1',passenger:'Original',voucher:'V1',createdAt:'2026-03-01T01:00:00Z',status:'synced'};
+ snapshot=await mutateDirectLedger(db,user,event('transaction','create',null,original),snapshot.revision);
+ const result=applyTicketMigration(snapshot,{sourceId:'original',sourcePrice:5000000,operationId:'attack',destination:{agencyId:'b',date:'2026-03-02',amount:5500000,ticket:'T2',passenger:'New',voucher:'V2'}},user.email,'2026-03-02T01:00:00Z',{legacyCloud:true});
+ async function forge(records){const batch=writeBatch(db),root=doc(db,'ledgers',user.uid);for(const record of records)batch.set(doc(root,'transactions',record.id),record);batch.set(doc(root,'activity','attack'),{...result.event,actorUid:user.uid,committedAt:serverTimestamp()});batch.set(root,{ownerUid:user.uid,revision:snapshot.revision+1,updatedAt:serverTimestamp(),hasClosedPeriods:false,lastOperation:{id:'attack',entity:'transaction',entityId:'original',action:'migrate'}});return batch.commit()}
+ await assertFails(forge([result.after,result.sale]));
+ await assertFails(forge([result.after,{...result.credit,amount:1},result.sale]));
+ assert.equal((await readDirectLedger(db,user.uid)).transactions.length,1);
+});
+
+test('cloud migration keeps existing rules and reports original-cost profit after reload',async()=>{
+ const {migrateDirectLedger}=await import('data:text/javascript;base64,'+Buffer.from(compiled).toString('base64'));
+ const {profitSummary,ticketHistory,activeLedgerRecords}=await import('../src/shared/accounting.mjs');
+ const {validateBackup}=await import('../src/shared/ledgerControls.mjs');
+ const {db,user}=session('original-cost-migration');let snapshot=await readDirectLedger(db,user.uid);
+ for(const id of ['a','b','c'])snapshot=await mutateDirectLedger(db,user,event('agency','create',null,{...agency,id,code:id.toUpperCase()}),snapshot.revision);
+ const original={id:'original',agencyId:'a',type:'sale',date:'2026-03-01',amount:1100000,ticketCost:1000000,ticket:'T1',passenger:'Original',voucher:'V1',createdAt:'2026-03-01T01:00:00Z',status:'synced'};
+ snapshot=await mutateDirectLedger(db,user,event('transaction','create',null,original),snapshot.revision);
+ snapshot=await migrateDirectLedger(db,user,{sourceId:original.id,sourcePrice:original.amount,operationId:'move1',destination:{agencyId:'b',date:'2026-03-02',amount:1050000,ticket:'T2',passenger:'Passenger',voucher:'V2'}},snapshot.revision);
+ snapshot=await readDirectLedger(db,user.uid);const sale=snapshot.transactions.find(t=>t.id==='move1_sale');
+ assert.equal(sale.ticketCost,1100000);assert.equal(sale.migration.rootId,undefined);
+ assert.equal(ticketHistory(sale,snapshot.transactions)[0].ticketCost,1000000);
+ assert.doesNotThrow(()=>validateBackup(snapshot));
+ const rows=activeLedgerRecords(snapshot.agencies,snapshot.transactions).transactions;
+ assert.equal(profitSummary(rows).total,50000);
+ assert.equal(rows.find(t=>t.id===sale.id).ticketCost,1000000);
+ for(const a of snapshot.agencies)assert.equal(profitSummary(rows.filter(t=>t.agencyId===a.id),rows).total,a.id==='b'?50000:0);
+ await assert.rejects(migrateDirectLedger(db,user,{sourceId:sale.id,sourcePrice:sale.amount,operationId:'move2',destination:{agencyId:'c',date:'2026-03-03',amount:1200000,ticket:'T3',passenger:'Passenger',voucher:'V3'}},snapshot.revision),/current cloud rules/);
+ assert.equal((await readDirectLedger(db,user.uid)).revision,snapshot.revision);
+});
+test('cloud migration with missing purchase cost keeps profit unknown',async()=>{
+ const {migrateDirectLedger}=await import('data:text/javascript;base64,'+Buffer.from(compiled).toString('base64'));
+ const {profitSummary}=await import('../src/shared/accounting.mjs');
+ const {db,user}=session('unknown-migration');let snapshot=await readDirectLedger(db,user.uid);
+ for(const id of ['a','b'])snapshot=await mutateDirectLedger(db,user,event('agency','create',null,{...agency,id,code:id}),snapshot.revision);
+ const original={id:'original',agencyId:'a',type:'sale',date:'2026-03-01',amount:1100000,ticket:'T1',passenger:'Original',voucher:'V1',createdAt:'2026-03-01T01:00:00Z',status:'synced'};
+ snapshot=await mutateDirectLedger(db,user,event('transaction','create',null,original),snapshot.revision);
+ snapshot=await migrateDirectLedger(db,user,{sourceId:'original',sourcePrice:1100000,operationId:'unknown',destination:{agencyId:'b',date:'2026-03-02',amount:1200000,ticket:'T2',passenger:'Passenger',voucher:'V2'}},snapshot.revision);
+ assert.deepEqual(profitSummary(snapshot.transactions),{total:0,missingCosts:1});
+});
+
+test('two scoped admins share writes, restore and migration while retaining their own audit identities',async()=>{
+ const ledgerId='shared-admin-ledger';
+ const member=uid=>({user:{uid,email:uid+'@example.com'},db:env.authenticatedContext(uid,{email:uid+'@example.com',ledgerAccess:true,ledgerRole:'admin',ledgerId}).firestore()});
+ const robin=member('shared-robin'),sohag=member('shared-sohag');
+ let snapshot=await mutateDirectLedger(robin.db,robin.user,event('agency','create',null,agency),0,ledgerId);
+ snapshot=await mutateDirectLedger(sohag.db,sohag.user,event('agency','edit',snapshot.agencies[0],{...agency,name:'Edited by Sohag'}),snapshot.revision,ledgerId);
+ assert.equal((await readDirectLedger(robin.db,ledgerId)).agencies[0].name,'Edited by Sohag');
+ assert.equal((await getDoc(doc(sohag.db,'ledgers',ledgerId))).data().ownerUid,ledgerId);
+ for(const member of [robin,sohag]){
+  const entries=snapshot.activity.filter(e=>e.actor===member.user.email);assert(entries.length);
+  for(const entry of entries)assert.equal((await getDoc(doc(member.db,'ledgers',ledgerId,'activity',entry.id))).data().actorUid,member.user.uid);
+ }
+ await assert.rejects(mutateDirectLedger(robin.db,robin.user,event('agency','edit',agency,{...agency,name:'Stale'}),1,ledgerId),/changed/);
+ for(const outsider of [env.unauthenticatedContext().firestore(),env.authenticatedContext('outsider',{ledgerAccess:true}).firestore(),env.authenticatedContext('wrong-target',{ledgerAccess:true,ledgerRole:'admin',ledgerId:'other'}).firestore(),env.authenticatedContext('wrong-role',{ledgerAccess:true,ledgerRole:'viewer',ledgerId}).firestore()])await assertFails(getDoc(doc(outsider,'ledgers',ledgerId)));
+ await assertFails(getDoc(doc(sohag.db,'ledgers',robin.user.uid)));
+ await assertFails(getDoc(doc(sohag.db,'ledgers',sohag.user.uid)));
+ await assertFails(setDoc(doc(sohag.db,'ledgers',ledgerId,'transactions','invalid'),{amount:-1}));
+ const before=snapshot.agencies[0],afterAgency={...before,name:'Forged actor'};
+ const op=event('agency','edit',before,afterAgency),batch=writeBatch(sohag.db),root=doc(sohag.db,'ledgers',ledgerId);
+ batch.set(doc(root,'agencies',agency.id),afterAgency);
+ batch.set(doc(root,'activity',op.id),{...op,actor:sohag.user.email,actorUid:ledgerId,committedAt:serverTimestamp()});
+ batch.set(root,{ownerUid:ledgerId,revision:snapshot.revision+1,updatedAt:serverTimestamp(),hasClosedPeriods:false,lastOperation:{id:op.id,entity:'agency',entityId:agency.id,action:'edit'}});
+ await assertFails(batch.commit());
+ const backup={version:2,agencies:[agency,{...agency,id:'b',code:'B'}],transactions:[{id:'shared-sale',agencyId:'a',type:'sale',date:'2026-03-01',amount:5000000,ticket:'T1',passenger:'Original',voucher:'S1',createdAt:'2026-03-01T01:00:00Z',status:'synced'}],activity:[]};
+ snapshot=await restoreDirectLedger(sohag.db,sohag.user,backup,snapshot.revision,'shared-restore',false,ledgerId);
+ const recovery=await getDoc(doc(robin.db,'ledgers',ledgerId,'recovery','shared-restore'));assert.equal(recovery.data().snapshot.agencies[0].name,'Edited by Sohag');
+ const {migrateDirectLedger}=await import('data:text/javascript;base64,'+Buffer.from(compiled).toString('base64'));
+ snapshot=await migrateDirectLedger(robin.db,robin.user,{sourceId:'shared-sale',sourcePrice:5000000,operationId:'shared-migration',destination:{agencyId:'b',date:'2026-03-02',amount:5500000,ticket:'T2',passenger:'New',voucher:'S2'}},snapshot.revision,ledgerId);
+ assert.equal(snapshot.transactions.length,3);
+ assert.equal((await readDirectLedger(sohag.db,ledgerId)).revision,snapshot.revision);
+ await assert.rejects(restoreDirectLedger(robin.db,robin.user,backup,snapshot.revision,'shared-import',true,ledgerId),/empty/);
+});

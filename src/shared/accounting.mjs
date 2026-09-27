@@ -1,17 +1,97 @@
 // Generated from src/accounting.ts. Run npm run build:domain.
+export function outgoingMigration(entry) {
+	return entry.nextMigration || (entry.migration?.sourceId === entry.id ? entry.migration : undefined);
+}
+export function ticketHistory(entry, entries) {
+	const byId = new Map(entries.map((item) => [item.id, item]));
+	const seen = new Set();
+	let root = entry;
+	while (root.migration && root.migration.sourceId !== root.id) {
+		if (seen.has(root.id)) throw Error("Invalid ticket migration cycle.");
+		seen.add(root.id);
+		const parent = byId.get(root.migration.sourceId);
+		if (!parent) throw Error("Ticket migration history is incomplete.");
+		root = parent;
+	}
+	const history = [];
+	seen.clear();
+	let current = root;
+	while (current) {
+		if (seen.has(current.id)) throw Error("Invalid ticket migration cycle.");
+		seen.add(current.id);
+		history.push(current);
+		const link = outgoingMigration(current);
+		if (!link) break;
+		current = byId.get(link.saleId);
+		if (!current) throw Error("Ticket migration history is incomplete.");
+	}
+	return history;
+}
+export function originalTicketCost(entry, entries) {
+	// Display-only cost survives agency/date filtering without rewriting stored history.
+	if ("resolvedTicketCost" in entry) return entry.resolvedTicketCost ?? undefined;
+	// Display ledgers resolve costs before agency/date filtering.
+	if (entry.migration && entry.migration.sourceId !== entry.id) {
+		const parent = entries.find((item) => item.id === entry.migration.sourceId);
+		if (parent?.type === "payment") return entry.ticketCost;
+		if (!parent) return undefined;
+	}
+	return ticketHistory(entry, entries)[0]?.ticketCost;
+}
+export function transactionLedgerNarration(transaction, agency) {
+	if (transaction.reversalOf) return transaction.narration || "Reversal";
+	const isTicket = transaction.type === "sale" || outgoingMigration(transaction);
+	if (!isTicket) return transaction.narration || "Payment received";
+	const date = (value) => value.split("-").reverse().join("-");
+	const details = `Ref No : ${transaction.reference || "-"}, Ticket No. ${transaction.ticket || "-"} Sector: ${transaction.sector || "-"}, Voucher No. ${transaction.voucher} to ${agency.name} on ${date(transaction.date)}, Flight Date : ${transaction.flightDate ? date(transaction.flightDate) : "-"}, Pax Name : ${transaction.passenger || "-"}, Ticket sales amount: BDT ${(transaction.amount / 100).toFixed(2)}`;
+	return transaction.narration ? `${details}, Notes: ${transaction.narration}` : details;
+}
+// Keep the original debit and its separate migration credit on their posting dates.
+// Resolve purchase costs before filtering so destination profit retains its history.
+export function mergeMigratedEntries(entries) {
+	return entries.map((entry) => {
+		if (entry.type !== "sale" || !entry.migration) return entry;
+		const cost = originalTicketCost(entry, entries);
+		return {
+			...entry,
+			ticketCost: cost,
+			resolvedTicketCost: cost ?? null
+		};
+	});
+}
+export function activeLedgerRecords(agencies, transactions) {
+	const visibleAgencies = agencies.filter((agency) => !agency.archivedAt);
+	const ids = new Set(visibleAgencies.map((agency) => agency.id));
+	return {
+		agencies: visibleAgencies,
+		transactions: mergeMigratedEntries(transactions).filter((entry) => !entry.archivedAt && ids.has(entry.agencyId))
+	};
+}
 export function ticketProfit(entry) {
-	if (entry.type !== "sale" || entry.reversalOf || entry.ticketCost === undefined) return null;
+	if (entry.type !== "sale" || entry.reversalOf || outgoingMigration(entry) || entry.ticketCost === undefined) return null;
 	assertMinor(entry.amount);
 	assertMinor(entry.ticketCost, true);
 	return entry.amount - entry.ticketCost;
+}
+/** Tax refunds are credit entries classified using the existing payment method field. */
+export function isTaxRefund(entry) {
+	return entry.type === "payment" && entry.method === "Tax Refund";
 }
 export function profitSummary(entries, allEntries = entries) {
 	let total = 0, missingCosts = 0;
 	const byId = new Map(allEntries.map((entry) => [entry.id, entry]));
 	for (const entry of entries) {
 		const original = entry.reversalOf ? byId.get(entry.reversalOf) : entry;
-		if (!original || original.type !== "sale" || original.reversalOf) continue;
-		const profit = ticketProfit(original);
+		if (original && isTaxRefund(original)) {
+			assertMinor(original.amount);
+			total = safeAdd(total, entry.reversalOf ? original.amount : -original.amount);
+			continue;
+		}
+		if (!original || original.type !== "sale" || original.reversalOf || outgoingMigration(original)) continue;
+		const profit = ticketProfit({
+			...original,
+			ticketCost: originalTicketCost(original, allEntries)
+		});
 		if (profit === null) {
 			missingCosts++;
 			continue;
@@ -62,10 +142,13 @@ export function movement(entry) {
 export function getBalance(agency, entries) {
 	return entries.filter((entry) => entry.agencyId === agency.id).reduce((balance, entry) => safeAdd(balance, movement(entry)), openingBalance(agency));
 }
+export function compareLedgerEntries(a, b) {
+	return Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.date.localeCompare(b.date) || a.id.localeCompare(b.id);
+}
 export function calculateLedger(agency, entries, from, to) {
 	if (!validDate(from) || !validDate(to) || from > to) throw new Error("Select a valid date range: From must be on or before To.");
 	if (agency.openingDate && from < agency.openingDate) throw new Error(`Statement starts before the opening balance date (${agency.openingDate}). Select this date or later.`);
-	const ordered = entries.filter((entry) => entry.agencyId === agency.id).sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+	const ordered = mergeMigratedEntries(entries).filter((entry) => entry.agencyId === agency.id).sort(compareLedgerEntries);
 	let running = openingBalance(agency);
 	for (const entry of ordered.filter((entry) => entry.date < from)) running = safeAdd(running, movement(entry));
 	const opening = running;
@@ -100,7 +183,7 @@ export function ledgerDateWindow(today) {
 	};
 }
 export function completeLedger(agency, entries, today) {
-	const dates = entries.filter((entry) => entry.agencyId === agency.id).map((entry) => entry.date).sort();
+	const dates = mergeMigratedEntries(entries).filter((entry) => entry.agencyId === agency.id).map((entry) => entry.date).sort();
 	const from = agency.openingDate || dates[0] || today;
 	const to = dates.length ? dates[dates.length - 1] > from ? dates[dates.length - 1] : from : from;
 	return {
