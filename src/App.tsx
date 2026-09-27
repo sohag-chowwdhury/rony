@@ -46,7 +46,7 @@ import {
     Wallet,
     X,
 } from "lucide-react";
-import { validatePaymentDetails, parseMoney, assertMinor, getBalance, balanceMeta, calculateLedger, validateEntry, amountInWords, ticketProfit, profitSummary } from "./accounting";
+import { validatePaymentDetails, parseMoney, assertMinor, getBalance, balanceMeta, calculateLedger, validateEntry, amountInWords, ticketProfit, profitSummary, ledgerDateWindow, completeLedger } from "./accounting";
 import { readLedgerSnapshot, persistLedger, makeAuditEvent, auditChanges, changeArchive, LEDGER_STORAGE_KEY, type AuditEvent } from "./history";
 import { useCloudLedger } from "./FirebaseGate";
 import { firebaseServices } from "./firebase";
@@ -1889,20 +1889,18 @@ function LedgerPage({
     onDelete: (id: string) => void;
 }) {
     const agency = agencies.find((a) => a.id === selected) || agencies[0];
-    const [dateFrom, setDateFrom] = useState(() => `${getToday().slice(0, 7)}-01`);
-    const [dateTo, setDateTo] = useState(getToday);
+    const [dateFrom, setDateFrom] = useState(() => ledgerDateWindow(getToday()).from);
+    const [dateTo, setDateTo] = useState(() => ledgerDateWindow(getToday()).to);
     const [ledgerPage, setLedgerPage] = useState(1);
-    const ledgerPageSize = 25;
-    useEffect(()=>{if(agency?.openingDate)setDateFrom(previous=>previous<agency.openingDate! ? agency.openingDate! : previous);},[agency?.id,agency?.openingDate]);
+    const ledgerPageSize = 50;
     const validRange = Boolean(
         agency &&
             dateFrom &&
             dateTo &&
-            dateFrom <= dateTo &&
-            (!agency.openingDate || dateFrom >= agency.openingDate),
+            dateFrom <= dateTo,
     );
-    const ledger = validRange && agency
-        ? calculateLedger(agency, transactions, dateFrom, dateTo)
+    const ledger = validRange && agency && (!agency.openingDate || dateTo >= agency.openingDate)
+        ? calculateLedger(agency, transactions, agency.openingDate && dateFrom < agency.openingDate ? agency.openingDate : dateFrom, dateTo)
         : { opening: 0, closing: 0, rows: [], totalDebit: 0, totalCredit: 0 };
     const { opening, closing: running, rows: mapped, totalDebit, totalCredit } = ledger;
     const profit = profitSummary(mapped.map(({ t }) => t), transactions);
@@ -1943,17 +1941,17 @@ function LedgerPage({
                     </button>
                     <button
                         className="outline-button"
-                        disabled={!validRange}
-                        title="Download the complete ledger for the selected date range"
+                        title="Download all entries for this agency, across all dates"
                         onClick={() => {
+                            const full = completeLedger(agency, transactions, getToday());
                             void downloadLedgerPdf(
                                 agency,
-                                mapped,
-                                opening,
-                                dateFrom,
-                                dateTo,
-                                totalDebit,
-                                totalCredit,
+                                full.rows,
+                                full.opening,
+                                full.from,
+                                full.to,
+                                full.totalDebit,
+                                full.totalCredit,
                             );
                         }}
                     >
@@ -1961,7 +1959,7 @@ function LedgerPage({
                     </button>
                 </div>
             </div>
-            {!validRange && <p role="alert">Select a valid date range. From must be on or before To{agency.openingDate ? ` and on or after opening date ${agency.openingDate}` : ""}.</p>}
+            {!validRange && <p role="alert">Select a valid date range. From must be on or before To.</p>}
             {validRange && <>
                 <div className="ledger-summary">
                     <div>

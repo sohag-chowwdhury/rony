@@ -87,6 +87,28 @@ export function calculateLedger(agency, entries, from, to) {
 		totalCredit
 	};
 }
+export function ledgerDateWindow(today) {
+	if (!validDate(today)) throw Error("Invalid current date.");
+	const shift = (offset) => {
+		const year = Number(today.slice(0, 4)) + offset;
+		const candidate = `${year}${today.slice(4)}`;
+		return validDate(candidate) ? candidate : `${year}-02-28`;
+	};
+	return {
+		from: shift(-1),
+		to: shift(1)
+	};
+}
+export function completeLedger(agency, entries, today) {
+	const dates = entries.filter((entry) => entry.agencyId === agency.id).map((entry) => entry.date).sort();
+	const from = agency.openingDate || dates[0] || today;
+	const to = dates.length ? dates[dates.length - 1] > from ? dates[dates.length - 1] : from : from;
+	return {
+		...calculateLedger(agency, entries, from, to),
+		from,
+		to
+	};
+}
 export function validateEntry(entry, agencies, entries, editing = false) {
 	movement(entry);
 	if (entry.ticketCost !== undefined) {

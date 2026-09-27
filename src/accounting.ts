@@ -73,6 +73,22 @@ export function calculateLedger<T extends LedgerEntry>(agency: BalanceAccount, e
     });
     return { opening, closing: running, rows, totalDebit, totalCredit };
 }
+export function ledgerDateWindow(today: string) {
+    if (!validDate(today)) throw Error("Invalid current date.");
+    const shift = (offset: number) => {
+        const year = Number(today.slice(0, 4)) + offset;
+        const candidate = `${year}${today.slice(4)}`;
+        return validDate(candidate) ? candidate : `${year}-02-28`;
+    };
+    return { from: shift(-1), to: shift(1) };
+}
+export function completeLedger<T extends LedgerEntry>(agency: BalanceAccount, entries: T[], today: string) {
+    const dates = entries.filter(entry => entry.agencyId === agency.id).map(entry => entry.date).sort();
+    const from = agency.openingDate || dates[0] || today;
+    const to = dates.length ? (dates[dates.length - 1] > from ? dates[dates.length - 1] : from) : from;
+    return { ...calculateLedger(agency, entries, from, to), from, to };
+}
+
 export function validateEntry(entry: LedgerEntry, agencies: BalanceAccount[], entries: LedgerEntry[], editing = false) {
     movement(entry);
     if (entry.ticketCost !== undefined) {
