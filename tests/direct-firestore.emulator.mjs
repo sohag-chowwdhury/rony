@@ -46,3 +46,14 @@ test('malicious atomic writes still cannot bypass money validation and closed pe
  snapshot=await mutateDirectLedger(db,user,event('agency','edit',snapshot.agencies[0],{...snapshot.agencies[0],closedThrough:'2026-02-28'}),snapshot.revision);
  await assertFails(forge({...tx,amount:100}));
 });
+
+test('ticket cost survives cloud create, edit and reload while debit stays at selling price',async()=>{
+ const {db,user}=session('ticket-cost');let snapshot=await mutateDirectLedger(db,user,event('agency','create',null,agency),0);
+ const sale={id:'sale',type:'sale',agencyId:'a',amount:120015,ticketCost:100010,date:'2026-03-01',voucher:'SALE-1',ticket:'T1',passenger:'Passenger',createdAt:'2026-03-01T00:00:00Z',status:'pending'};
+ snapshot=await mutateDirectLedger(db,user,event('transaction','create',null,sale),snapshot.revision);
+ assert.equal(snapshot.transactions[0].ticketCost,100010);
+ const before=snapshot.transactions[0];
+ snapshot=await mutateDirectLedger(db,user,event('transaction','edit',before,{...before,ticketCost:110000}),snapshot.revision);
+ const reloaded=await readDirectLedger(db,user.uid);
+ assert.equal(reloaded.transactions[0].ticketCost,110000);assert.equal(reloaded.transactions[0].amount,120015);
+});

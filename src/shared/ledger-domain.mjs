@@ -2,7 +2,7 @@ import { validateOpening, protectTransaction, makeReversal, validateMatch, valid
 import { validatePaymentDetails, assertMinor, validateEntry, getBalance, canDeleteAgency, validDate } from './accounting.mjs';
 const textFields = ['id','code','name','contact','phone','address','agencyId','date','voucher','reference','ticket','passenger','sector','flightDate','method','bank','sendingBank','receivingBank','sendingBankName','receivingBankName','chequeNumber','chequeDate','walletNumber','narration','createdAt','archivedAt','openingDate','closedThrough','reversalOf'];
 const agencyFields = ['id','code','name','contact','phone','address','opening','openingSide','active','archivedAt','openingDate','closedThrough'];
-const transactionFields = ['id','type','agencyId','date','voucher','reference','ticket','passenger','sector','flightDate','amount','method','bank','sendingBank','receivingBank','sendingBankName','receivingBankName','chequeNumber','chequeDate','walletNumber','narration','status','createdAt','archivedAt','reversalOf','reconciliation'];
+const transactionFields = ['id','type','agencyId','date','voucher','reference','ticket','passenger','sector','flightDate','amount','ticketCost','method','bank','sendingBank','receivingBank','sendingBankName','receivingBankName','chequeNumber','chequeDate','walletNumber','narration','status','createdAt','archivedAt','reversalOf','reconciliation'];
 export function validateId(id) {
   if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(id)) throw Error('Invalid record ID.');
 }
@@ -25,6 +25,10 @@ export function cleanRecord(entity, input) {
   } else {
     if (!record.agencyId || !['sale','payment'].includes(record.type) || !validDate(record.date) || !record.voucher?.trim()) throw Error('Invalid transaction.');
     assertMinor(record.amount);
+    if (record.ticketCost !== undefined) {
+      if (record.type !== 'sale') throw Error('Ticket cost is only valid for ticket sales.');
+      assertMinor(record.ticketCost, true);
+    }
     if (record.type === 'sale' && !record.reversalOf && (!record.ticket?.trim() || !record.passenger?.trim())) throw Error('Ticket number and passenger are required.');
     for (const key of ['flightDate','chequeDate']) if (record[key] && !validDate(record[key])) throw Error(`Invalid ${key}.`);
     if (record.archivedAt && !Number.isFinite(Date.parse(record.archivedAt))) throw Error('Invalid archive date.');

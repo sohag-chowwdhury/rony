@@ -1,10 +1,25 @@
 {
-    "name": "Aegis Travel Ledger",
-    "short_name": "Aegis Ledger",
+    "name": "A TO Z AIR TRAVELS",
+    "short_name": "A TO Z",
     "start_url": "/",
     "display": "standalone",
     "background_color": "#f4f7f6",
     "theme_color": "#113936",
     "description": "Travel agency ticket sales and ledger PWA",
-    "icons": []
+    "icons": [
+        {
+            "src": "/app-icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "/app-icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "id": "/",
+    "scope": "/"
 }

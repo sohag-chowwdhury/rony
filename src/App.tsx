@@ -1,5 +1,7 @@
 import { validateOpening, protectTransaction, makeReversal, validateMatch, validateBackup } from "./ledgerControls";
 import { LedgerTools } from "./LedgerTools";
+import InstallGuide from "./InstallGuide";
+import AccountMenu from "./AccountMenu";
 import { useFormSafety } from "./useFormSafety";
 import { encodeCsv } from "./csv";
 import { mergeAgencyEdit, sameRecord } from "./recordComparison";
@@ -44,7 +46,7 @@ import {
     Wallet,
     X,
 } from "lucide-react";
-import { validatePaymentDetails, parseMoney, assertMinor, getBalance, balanceMeta, calculateLedger, validateEntry, amountInWords } from "./accounting";
+import { validatePaymentDetails, parseMoney, assertMinor, getBalance, balanceMeta, calculateLedger, validateEntry, amountInWords, ticketProfit, profitSummary } from "./accounting";
 import { readLedgerSnapshot, persistLedger, makeAuditEvent, auditChanges, changeArchive, LEDGER_STORAGE_KEY, type AuditEvent } from "./history";
 import { useCloudLedger } from "./FirebaseGate";
 import { firebaseServices } from "./firebase";
@@ -61,6 +63,7 @@ type Page =
     | "ledger"
     | "reports"
     | "settings"
+    | "install"
     | "archive"
     | "activity"
     | "reconciliation";
@@ -95,6 +98,7 @@ export type Transaction = {
     sector?: string;
     flightDate?: string;
     amount: number;
+    ticketCost?: number;
     method?: string;
     bank?: string;
     sendingBank?: string;
@@ -424,6 +428,7 @@ const navItems: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
     { id: "archive", label: "Archive", icon: Archive },
     { id: "activity", label: "Activity Log", icon: Activity },
     { id: "settings", label: "Settings", icon: SettingsIcon },
+    { id: "install", label: "Install Tutorial", icon: Download },
 ];
 
 type ToastKind = "success" | "error";
@@ -615,7 +620,7 @@ export default function App() {
                             {online ? <Cloud size={16} /> : <CloudOff size={16} />}
                             <span>{online ? "Online" : "Offline"}</span>
                         </div>
-                        {pending > 0 && (
+                        {pending > 0 && !cloud && (
                             <button className="sync-button" onClick={sync}>
                                 <RefreshCw size={15} className={syncing ? "spin" : ""} />{" "}
                                 {cloud ? "Refresh cloud" : syncing ? "Syncing" : `${pending} pending sync`}
@@ -625,7 +630,7 @@ export default function App() {
                             <Bell size={18} />
                             <i />
                         </button>
-                        <button className="top-avatar">AR</button>
+                        <AccountMenu busy={cloud?.busy} />
                     </div>
                 </header>
                 {!online && (
@@ -636,6 +641,7 @@ export default function App() {
                     </div>
                 )}
                 <div className="page-body">
+                    <div hidden={page !== "install"}><InstallGuide /></div>
                     {lastCredit && (
                         <CreditReceiptNotice
                             transaction={lastCredit}
@@ -846,6 +852,7 @@ function Dashboard({
     transactions: Transaction[];
     onNavigate: (p: Page) => void;
 }) {
+    const profit = profitSummary(transactions);
     const sales = transactions
         .filter((t) => t.type === "sale")
         .reduce((s, t) => s + t.amount, 0),
@@ -903,6 +910,7 @@ function Dashboard({
                     meta="From agencies"
                     tone="ink"
                 />
+                <Stat icon={TrendingUp} label="Total profit" value={`${profit.total < 0 ? "-" : ""}${money(profit.total)}`} meta={profit.missingCosts ? `Partial total: ${profit.missingCosts} entries missing cost` : "All dates"} tone="teal" />
             </div>
             <div className="dashboard-grid">
                 <section className="panel balance-panel">
@@ -1552,6 +1560,7 @@ function TransactionTable({
                                 : t.method || "Payment"}
                         </b>
                         <small>{t.type === "sale" ? t.ticket : t.reference}</small>
+                        {t.type === "sale" && !t.reversalOf && <small>{ticketProfit(t) === null ? "Profit: cost not recorded" : `Ticket cost: ${money(t.ticketCost!)} | Profit: ${ticketProfit(t)! < 0 ? "-" : ""}${money(ticketProfit(t)!)}`}</small>}
                     </span>
                     <span className="debit">
                         {t.type === "sale" ? money(t.amount) : "—"}
@@ -1632,7 +1641,7 @@ const printDate = (value: string) => new Date(`${value}T00:00:00`).toLocaleDateS
 const pdfDate = (value: string) => value.split("-").reverse().join("-");
 const transactionPdfNarration = (transaction: Transaction, agency: Agency) =>
     transaction.type === "sale"
-        ? `Ref No : ${transaction.reference || "-"}, Ticket No. ${transaction.ticket || "-"} Sector: ${transaction.sector || "-"}, Voucher No. ${transaction.voucher} to ${agency.name} on ${pdfDate(transaction.date)}, Flight Date : ${transaction.flightDate ? pdfDate(transaction.flightDate) : "-"}, Pax Name : ${transaction.passenger || "-"}`
+        ? transaction.reversalOf ? transaction.narration || "Reversal" : `Ref No : ${transaction.reference || "-"}, Ticket No. ${transaction.ticket || "-"} Sector: ${transaction.sector || "-"}, Voucher No. ${transaction.voucher} to ${agency.name} on ${pdfDate(transaction.date)}, Flight Date : ${transaction.flightDate ? pdfDate(transaction.flightDate) : "-"}, Pax Name : ${transaction.passenger || "-"}, Ticket sales amount: BDT ${(transaction.amount / 100).toFixed(2)}`
         : transaction.narration || "Payment received";
 
 function downloadAgencyDirectoryPdf(agencies: Agency[], transactions: Transaction[]) {
@@ -1670,7 +1679,7 @@ function downloadAgencyDirectoryPdf(agencies: Agency[], transactions: Transactio
 
 function ledgerStatementData(agency: Agency, rows: { t: Transaction; running: number }[], opening: number, dateFrom: string, dateTo: string, totalDebit = 0, totalCredit = 0): StatementData {
     return {
-        account: `${agency.code} ${agency.name}`,
+        account: agency.name,
         from: dateFrom,
         to: dateTo,
         opening,
@@ -1696,14 +1705,11 @@ async function downloadLedgerPdf(
     dateTo: string,
     totalDebit: number,
     totalCredit: number,
-    page?: number,
-    pageCount?: number,
 ) {
     const logo = await loadPdfImage("/az-air-travels-logo.png");
     const logoDataUrl = logo ?? undefined;
-    const suffix = pageCount && pageCount > 1 && page ? `-page-${page}-of-${pageCount}` : "";
     createLedgerPdf(ledgerStatementData(agency, rows, opening, dateFrom, dateTo, totalDebit, totalCredit), logoDataUrl).save(
-        `agency-ledger-${agency.code}-${dateFrom}-to-${dateTo}${suffix}.pdf`,
+        `agency-ledger-${agency.code}-${dateFrom}-to-${dateTo}.pdf`,
     );
 }
 async function loadPdfImage(path: string) {
@@ -1853,6 +1859,16 @@ async function downloadCreditReceiptPdf(agency: Agency, data: { date: string; vo
     pdf.save(`credit-receipt-${data.voucher || "receipt"}.pdf`);
 }
 
+function LedgerProfit({ transaction }: { transaction: Transaction }) {
+    const profit = ticketProfit(transaction);
+    return <span className="ledger-profit" title="Profit margin = profit / ticket sales amount x 100">
+        {transaction.type !== "sale" || transaction.reversalOf ? "—" : profit === null ? <small>Cost not recorded</small> : <>
+            <b>{profit < 0 ? "-" : ""}{money(profit)}</b>
+            <small>{((profit / transaction.amount) * 100).toFixed(2)}% margin</small>
+        </>}
+    </span>;
+}
+
 function LedgerPage({
     agencies,
     transactions,
@@ -1889,12 +1905,10 @@ function LedgerPage({
         ? calculateLedger(agency, transactions, dateFrom, dateTo)
         : { opening: 0, closing: 0, rows: [], totalDebit: 0, totalCredit: 0 };
     const { opening, closing: running, rows: mapped, totalDebit, totalCredit } = ledger;
+    const profit = profitSummary(mapped.map(({ t }) => t), transactions);
     const ledgerPageCount = Math.max(1, Math.ceil(mapped.length / ledgerPageSize));
     const ledgerPageStart = (ledgerPage - 1) * ledgerPageSize;
     const shownLedgerRows = mapped.slice(ledgerPageStart, ledgerPage * ledgerPageSize);
-    const pdfOpening = ledgerPageStart === 0 ? opening : mapped[ledgerPageStart - 1]!.running;
-    const pdfDebit = shownLedgerRows.reduce((sum, { t }) => sum + (t.type === "sale" ? t.amount : 0), 0);
-    const pdfCredit = shownLedgerRows.reduce((sum, { t }) => sum + (t.type === "payment" ? t.amount : 0), 0);
     useEffect(() => setLedgerPage(1), [agency?.id, dateFrom, dateTo]);
     useEffect(() => setLedgerPage((current) => Math.min(current, ledgerPageCount)), [ledgerPageCount]);
     if (!agency) return <p>Create an agency to view its ledger.</p>;
@@ -1930,22 +1944,16 @@ function LedgerPage({
                     <button
                         className="outline-button"
                         disabled={!validRange}
-                        title={
-                            ledgerPageCount > 1
-                                ? `Download PDF for page ${ledgerPage} of ${ledgerPageCount} (${shownLedgerRows.length} entries)`
-                                : "Download PDF for this ledger"
-                        }
+                        title="Download the complete ledger for the selected date range"
                         onClick={() => {
                             void downloadLedgerPdf(
                                 agency,
-                                shownLedgerRows,
-                                pdfOpening,
+                                mapped,
+                                opening,
                                 dateFrom,
                                 dateTo,
-                                pdfDebit,
-                                pdfCredit,
-                                ledgerPage,
-                                ledgerPageCount,
+                                totalDebit,
+                                totalCredit,
                             );
                         }}
                     >
@@ -1974,6 +1982,11 @@ function LedgerPage({
                         <span>Total credit</span>
                         <b className="credit">{money(totalCredit)}</b>
                     </div>
+                    <div>
+                        <span>Total profit</span>
+                        <b>{profit.total < 0 ? "-" : ""}{money(profit.total)}</b>
+                        {profit.missingCosts > 0 && <small>Partial total: {profit.missingCosts} entries missing cost</small>}
+                    </div>
                     <div className="closing">
                         <span>Closing balance</span>
                         <b>
@@ -1998,24 +2011,10 @@ function LedgerPage({
                             <span>Payment mode</span>
                             <span>Debit</span>
                             <span>Credit</span>
-                            <span>Balance</span>
+                            <span className="ledger-profit">Profit</span>
                             <span>Actions</span>
                         </div>
-                        <div className="ledger-row opening-row">
-                            <span>{printDate(dateFrom)}</span>
-                            <span>
-                                <b>Opening balance</b>
-                                <small>Verified opening position</small>
-                            </span>
-                            <span>—</span>
-                            <span>—</span>
-                            <span>—</span>
-                            <span>
-                                <b>{money(Math.abs(opening))}</b>
-                                <em>{balanceMeta(opening).side}</em>
-                            </span>
-                        </div>
-                        {shownLedgerRows.map(({ t, running: current }) => (
+                        {shownLedgerRows.map(({ t }) => (
                             <div className="ledger-row" key={t.id}>
                                 <span>{printDate(t.date)}</span>
                                 <span>
@@ -2025,6 +2024,8 @@ function LedgerPage({
                                             t.passenger ||
                                             (t.type === "payment" ? "Payment received" : "Ticket sale")}
                                     </small>
+                                    {t.type === "sale" && !t.reversalOf && <small>Ticket sales amount: {money(t.amount)}</small>}
+
                                 </span>
                                 <span>{t.method || "—"}</span>
                                 <span className="debit">
@@ -2055,12 +2056,7 @@ function LedgerPage({
                                         </button>
                                     )}
                                 </span>
-                                <span>
-                                    <b>{money(balanceMeta(current).value)}</b>
-                                    <em className={current < 0 ? "orange-text" : ""}>
-                                        {balanceMeta(current).side}
-                                    </em>
-                                </span>
+                                <LedgerProfit transaction={t} />
                                 <span className="ledger-row-actions">
                                     <button className="ledger-row-action" disabled={Boolean(t.archivedAt)} onClick={() => onEdit(t)}>
                                         Edit
@@ -2428,10 +2424,15 @@ function SaleForm({
         passenger: initialTransaction?.passenger || "",
         sector: initialTransaction?.sector || "",
         flightDate: initialTransaction?.flightDate || "",
+        ticketCost: initialTransaction?.ticketCost === undefined ? "" : String(initialTransaction.ticketCost / 100),
         amount: initialTransaction ? String(initialTransaction.amount / 100) : "",
         narration: initialTransaction?.narration || "",
     });
     const safety=useFormSafety(data,onClose);
+    const profit = (() => {
+        try { return parseMoney(data.amount) - parseMoney(data.ticketCost, true); }
+        catch { return null; }
+    })();
     const set = (key: string, value: string) =>
         setData((d) => ({ ...d, [key]: value }));
     const submit = async () => {
@@ -2439,10 +2440,12 @@ function SaleForm({
         try {
             if (!data.agencyId || !data.date || !data.voucher.trim() || !data.ticket.trim() || !data.passenger.trim() || !data.amount)
                 throw new Error("Please complete all required sale fields.");
+            if (!initialTransaction && !data.ticketCost) throw new Error("Enter the ticket amount (cost).");
             await onSave({
                 ...data,
                 id: initialTransaction?.id || id("sale"),
                 type: "sale",
+                ticketCost: data.ticketCost === "" ? undefined : parseMoney(data.ticketCost, true),
                 amount: parseMoney(data.amount),
                 status: "pending",
                 createdAt: initialTransaction?.createdAt || new Date().toISOString(),
@@ -2454,7 +2457,7 @@ function SaleForm({
     return (
         <ModalShell
             title={initialTransaction ? "Edit ticket sale" : "Add ticket sale"}
-            subtitle="This ticket will be posted as a debit to the selected agency ledger"
+            subtitle="The ticket sales amount will be posted as a debit to the selected agency ledger"
             onClose={safety.close}
         >
             {safety.error && <p className="form-save-error" role="alert">{safety.error} Your entries are still in this form.</p>}
@@ -2522,7 +2525,10 @@ function SaleForm({
                         onChange={(e) => set("flightDate", e.target.value)}
                     />
                 </Field>
-                <Field label="Ticket amount (BDT)" required>
+                <Field label="Ticket amount / cost (BDT)" required={!initialTransaction}>
+                    <input type="number" min="0" step="0.01" placeholder="0.00" value={data.ticketCost} onChange={(e) => set("ticketCost", e.target.value)} />
+                </Field>
+                <Field label="Ticket sales amount (BDT)" required>
                     <div className="money-input">
                         <span>৳</span>
                         <input
@@ -2532,6 +2538,9 @@ function SaleForm({
                             onChange={(e) => set("amount", e.target.value)}
                         />
                     </div>
+                </Field>
+                <Field label="Profit (BDT)">
+                    <output aria-live="polite">{profit === null ? "Enter ticket cost and sales amount" : `${profit < 0 ? "-" : ""}${money(profit)}`}</output>
                 </Field>
                 <Field label="Notes / narration">
                     <input
@@ -2908,10 +2917,10 @@ function formatAuditTime(value: string) {
 function ActivityLog({ events, agencies }: { events: AuditEvent[]; agencies: Agency[] }) {
     const [query, setQuery] = useState("");
     const [action, setAction] = useState("");
-    const labels: Record<string, string> = { amount: "Amount", opening: "Opening balance", openingSide: "Opening side", agencyId: "Agency", date: "Posting date", createdAt: "Created at", archivedAt: "Archived at", voucher: "Voucher", passenger: "Passenger", flightDate: "Flight date", narration: "Narration", status: "Sync status" };
+    const labels: Record<string, string> = { amount: "Sales / payment amount", ticketCost: "Ticket cost", opening: "Opening balance", openingSide: "Opening side", agencyId: "Agency", date: "Posting date", createdAt: "Created at", archivedAt: "Archived at", voucher: "Voucher", passenger: "Passenger", flightDate: "Flight date", narration: "Narration", status: "Sync status" };
     const value = (field: string, item: unknown): string => {
         if (item === undefined || item === null || item === "") return "—";
-        if ((field === "amount" || field === "opening") && typeof item === "number") return money(item);
+        if ((field === "amount" || field === "ticketCost" || field === "opening") && typeof item === "number") return money(item);
         if (field === "agencyId") return agencies.find(a => a.id === item)?.name || String(item);
         if ((field === "createdAt" || field === "archivedAt") && typeof item === "string") return formatAuditTime(item);
         if ((field === "date" || field === "flightDate" || field === "chequeDate") && typeof item === "string") return printDate(item);

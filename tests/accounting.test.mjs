@@ -226,3 +226,23 @@ test('agency form saves edits against latest store data and audits merged values
   assert.throws(() => h.store.updateAgency({ ...original, opening: 50000 }, original), /Opening balance changed/);
   assert.equal(h.storage.getItem(history.LEDGER_STORAGE_KEY), persisted);
 });
+test('PDF report totals and end marker appear only on the final page of a long ledger',()=>{
+ const rows=Array.from({length:300},(_,i)=>({date:'2026-09-20',voucher:`LONG-${i}`,narration:'Ticket sale details for pagination verification',method:'',debit:10000,credit:0,balance:(i+1)*10000}));
+ const pdf=createLedgerPdf({account:'Long ledger',from:'2026-09-01',to:'2026-09-30',opening:0,rows});
+ assert(pdf.getNumberOfPages()>=10);
+ for(let i=1;i<=pdf.getNumberOfPages();i++){
+  const content=pdf.internal.pages[i].join('\n');
+  assert.equal(content.includes('(Total Closing Balance :)'),i===pdf.getNumberOfPages());
+  assert.equal(content.includes('(*** End of the Report ***)'),i===pdf.getNumberOfPages());
+  assert(!content.includes('(Total Debit     :)'));assert(!content.includes('(Total Credit    :)'));
+ }
+ const last=pdf.internal.pages[pdf.getNumberOfPages()].join('\n');
+ assert(last.includes('(30,000)'));assert(last.includes('(30,000.00 Dr)'));
+});
+
+test('empty PDF retains credit opening balance in the final total',()=>{
+ const pdf=createLedgerPdf({account:'Empty ledger',from:'2026-09-01',to:'2026-09-30',opening:-500000,rows:[]});
+ assert.equal(pdf.getNumberOfPages(),1);
+ const page=pdf.internal.pages[1].join('\n');
+ assert(page.includes('(Total Closing Balance :)'));assert(page.includes('(5,000.00 Cr)'));
+});

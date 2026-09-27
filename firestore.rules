@@ -28,7 +28,7 @@ service cloud.firestore {
    return m == {} || (t.type == 'payment' && t.get('reversalOf','') == '' && m.keys().hasOnly(['bankAccount','bankReference','date','amount']) && text(m.bankAccount) && text(m.bankReference) && date(m.date) && m.amount == t.amount);
   }
   function validTransaction(uid,id,t) {
-   return t.keys().hasOnly(['id','type','agencyId','date','voucher','reference','ticket','passenger','sector','flightDate','amount','method','bank','sendingBank','receivingBank','sendingBankName','receivingBankName','chequeNumber','chequeDate','walletNumber','narration','status','createdAt','archivedAt','reversalOf','reconciliation']) && t.id == id && t.type in ['sale','payment'] && text(t.agencyId) && date(t.date) && text(t.voucher) && text(t.createdAt) && t.status == 'synced' && money(t.amount,false) && existsAfter(agencyPath(uid,t.agencyId)) && validMatch(t);
+   return t.keys().hasOnly(['id','type','agencyId','date','voucher','reference','ticket','passenger','sector','flightDate','amount','ticketCost','method','bank','sendingBank','receivingBank','sendingBankName','receivingBankName','chequeNumber','chequeDate','walletNumber','narration','status','createdAt','archivedAt','reversalOf','reconciliation']) && t.id == id && t.type in ['sale','payment'] && text(t.agencyId) && date(t.date) && text(t.voucher) && text(t.createdAt) && t.status == 'synced' && money(t.amount,false) && (!('ticketCost' in t) || (t.type == 'sale' && money(t.ticketCost,true))) && existsAfter(agencyPath(uid,t.agencyId)) && validMatch(t);
   }
   function validReversal(uid,t) {
    let original=getAfter(transactionPath(uid,t.reversalOf)).data;

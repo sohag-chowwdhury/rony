@@ -43,8 +43,9 @@ function layoutStatement(data: StatementData) {
         y = top + 7;
     };
     const nextPage = () => { page = []; pages.push(page); columns(7); };
-    text("A TO Z AIR TRAVELS", 118, 12, 12, "times", "bold", "center");
-    text("General Ledger", 118, 17, 11, "times", "bold", "center");
+    const headingCenter = measure.internal.pageSize.getWidth() / 2;
+    text("A TO Z AIR TRAVELS", headingCenter, 12, 12, "times", "bold", "center");
+    text("General Ledger", headingCenter, 17, 11, "times", "bold", "center");
     const accountLines = wrap(data.account, 117, "times", 9);
     text("Account Name   :", 7, 28, 9, "times");
     accountLines.forEach((line, index) => text(line, 30, 28 + index * 4, 9, "times"));
@@ -53,13 +54,7 @@ function layoutStatement(data: StatementData) {
     text("Period              :", 7, periodY, 9, "times");
     text(`${dateLabel(data.from)} to ${dateLabel(data.to)}`, 30, periodY, 9, "times");
     text("User ID        :  admin", 160, periodY, 9, "times");
-    const totalsY = periodY + 8;
-    text("Total Debit     :", 7, totalsY, 9, "times");
-    text(`${amount(data.totalDebit ?? 0, true)} Dr`, 40, totalsY, 9, "times");
-    text("Total Credit    :", 150, totalsY, 9, "times");
-    text(`${amount(data.totalCredit ?? 0, true)} Cr`, 177, totalsY, 9, "times");
-    rule(periodY + 12);
-    columns(periodY + 20);
+    columns(periodY + 10);
 
     const drawRow = (cells: string[], date?: string) => {
         const widths = [20, 69, 27, 20, 20, 31];
@@ -94,6 +89,19 @@ function layoutStatement(data: StatementData) {
         previousDate = row.date;
     }
     if (!data.rows.length) drawRow(["", "No transactions in this period", "", "", "", balance(data.opening)]);
+    // Add the report totals once, after all transaction pages are laid out.
+    // Keep the totals and end marker together above the page footer.
+    if (y + 25 > 279) nextPage();
+    const totalDebit = data.totalDebit ?? data.rows.reduce((sum, row) => sum + row.debit, 0);
+    const totalCredit = data.totalCredit ?? data.rows.reduce((sum, row) => sum + row.credit, 0);
+    const closing = data.rows.length ? data.rows[data.rows.length - 1].balance : data.opening;
+    rule(y);
+    text("Total Closing Balance :", 118, y + 4, 8, "courier", "bold", "right");
+    text(amount(totalDebit), 148, y + 4, 8, "courier", "bold", "right");
+    text(amount(totalCredit), 170, y + 4, 8, "courier", "bold", "right");
+    text(balance(closing), 202, y + 4, 8, "courier", "bold", "right");
+    rule(y + 7);
+    text("*** End of the Report ***", headingCenter, y + 24, 8, "courier", "bold", "center");
     const stamp = new Date().toLocaleString("en-US", { timeZone: "Asia/Dhaka", hour12: true, year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" });
     pages.forEach((current, index) => {
         page = current;

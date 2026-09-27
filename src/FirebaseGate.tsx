@@ -1,9 +1,10 @@
 ﻿import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut, type User } from "firebase/auth";
+import { onAuthStateChanged, signInWithEmailAndPassword, type User } from "firebase/auth";
 import { collection, doc, getDocs, limit, onSnapshot, orderBy, query } from "firebase/firestore";
 import { readDirectLedger, mutateDirectLedger, restoreDirectLedger } from "./directLedger";
 import { firebaseConfigurationError, firebaseServices } from "./firebase";
+import AccountMenu from "./AccountMenu";
 import { LEDGER_STORAGE_KEY, readLedgerSnapshot, type AuditEvent, type LedgerSnapshot } from "./history";
 import type { Agency, Transaction } from "./App";
 export type CloudSnapshot = LedgerSnapshot<Agency, Transaction> & { revision: number };
@@ -40,8 +41,8 @@ function AuthShell({ children }: { children: ReactNode }) {
 function CloudSession({ user, children }: { user: User; children: ReactNode }) {
     const services = firebaseServices!;
     const [snapshot, setSnapshot] = useState<CloudSnapshot | null>(null), [error, setError] = useState(""), [busy, setBusy] = useState(false), [online, setOnline] = useState(navigator.onLine);
-    const [listenerVersion, setListenerVersion] = useState(0);
-    const accessMessage = `The account ${user.email || user.uid} needs ledger access from your administrator. After access is granted, click Refresh or sign out and sign in again.`;
+
+    const accessMessage = `The account ${user.email || user.uid} needs ledger access from your administrator. After access is granted, sign out and sign in again.`;
     const inFlight = useRef(false), mounted = useRef(true), requestNumber = useRef(0);
     const accept = (next: CloudSnapshot) => { if (mounted.current) setSnapshot(current => !current || next.revision >= current.revision ? next : current); };
     const readCloudSnapshot = () => readDirectLedger(services.db,user.uid);
@@ -66,7 +67,7 @@ function CloudSession({ user, children }: { user: User; children: ReactNode }) {
         const on = () => { setOnline(true); void refresh().catch(() => { }); }, off = () => setOnline(false);
         window.addEventListener("online", on); window.addEventListener("offline", off);
         return () => { active = false; mounted.current = false; unsubscribe(); window.removeEventListener("online", on); window.removeEventListener("offline", off); };
-    }, [user.uid, listenerVersion]);
+    }, [user.uid]);
     const mutate = async (event: AuditEvent, revision: number) => {
         if (!navigator.onLine) throw new Error("You are offline. Reconnect before saving financial changes.");
         if (inFlight.current) throw new Error("A change is already being saved. Wait for confirmation.");
@@ -110,7 +111,7 @@ function CloudSession({ user, children }: { user: User; children: ReactNode }) {
         finally { inFlight.current = false; if (mounted.current) setBusy(false); }
     };
     const hasLocal = Boolean(localStorage.getItem(LEDGER_STORAGE_KEY) || localStorage.getItem("aegis-agencies") || localStorage.getItem("aegis-transactions"));
-    return <><div className="firebase-banner"><span>Firebase · {user.email} · {busy ? "Saving…" : online ? "Connected" : "Offline — changes require a connection"}</span><button disabled={busy} onClick={() => { setListenerVersion(value => value + 1); }}>Refresh</button><button disabled={busy} onClick={() => { void signOut(services.auth).catch(error => setError(message(error))); }}>Sign out</button></div>
+    return <>{!snapshot && <div className="account-recovery-bar"><AccountMenu busy={busy} /></div>}
         {error && <p className="firebase-error" role="alert">{error}</p>}
         {!snapshot ? <p className="archive-empty">{error ? "Unable to load your cloud ledger. Check account access and deployment, then refresh." : "Loading cloud ledger…"}</p> : <>
             {snapshot.revision === 0 && hasLocal && <section className="firebase-migration"><h2>Existing local ledger found</h2><p>Your cloud ledger is empty. Download a local backup, then import the saved records and history into this signed-in account. Local records will remain on this device.</p><button onClick={exportLocal}>Download local backup</button><button disabled={busy || !online} onClick={() => { void importLocal(); }}>Import local ledger into {user.email}</button></section>}

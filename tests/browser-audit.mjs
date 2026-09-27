@@ -16,7 +16,7 @@ const agency=(await snapshot()).agencies.find(a=>a.code==='AUDIT-001');assert.eq
 await nav('Ticket Sales');
 await page.getByRole('button',{name:/Add.*ticket|New.*sale|Add.*sale/i}).first().click();
 await page.getByLabel('Agency',{exact:false}).selectOption(agency.id);
-await page.getByLabel('Ticket number').fill('AUDIT-T1');await page.getByLabel('Passenger name').fill('Dummy Passenger');await page.getByLabel('Ticket amount').fill('50.15');
+await page.getByLabel('Ticket number').fill('AUDIT-T1');await page.getByLabel('Passenger name').fill('Dummy Passenger');await page.getByLabel('Ticket amount').fill('40.00');await page.getByLabel('Ticket sales amount').fill('50.15');
 await page.getByRole('button',{name:/Save entry/i}).click();await page.locator('.modal').waitFor({state:'hidden'});
 let saved=await snapshot();assert.equal(saved.transactions.find(t=>t.agencyId===agency.id).amount,5015);
 await nav('Payment Receipts');

@@ -1,0 +1,12 @@
+﻿.account-menu { position: relative; flex-shrink: 0; }
+.account-menu-panel { position: absolute; right: 0; top: calc(100% + 12px); z-index: 60; width: min(260px, calc(100vw - 32px)); padding: 16px; border: 1px solid #315249; border-radius: 12px; background: #142923; color: #effcf6; box-shadow: 0 14px 36px #0006; }
+.account-menu-panel > strong, .account-menu-panel > span { display: block; overflow-wrap: anywhere; }
+.account-menu-panel > strong { font-size: 14px; }
+.account-menu-panel > span { margin-top: 4px; color: #adc7bc; font-size: 12px; }
+.account-menu-panel > button { display: flex; align-items: center; gap: 9px; width: 100%; margin-top: 16px; padding: 11px; border: 1px solid #456357; border-radius: 8px; background: #1c3a2f; color: #effcf6; text-align: left; }
+.account-menu-panel > button:hover:not(:disabled) { background: #295140; }
+.account-menu-panel > button:disabled { opacity: .55; cursor: not-allowed; }
+.account-menu button:focus-visible { outline: 2px solid #83e3c7; outline-offset: 3px; }
+.account-menu-panel p { margin-bottom: 0; font-size: 12px; color: #ffcfb8; overflow-wrap: anywhere; }
+.account-recovery-bar { display: flex; justify-content: flex-end; padding: 14px 20px; }
+@media print { .account-menu { display: none; } }

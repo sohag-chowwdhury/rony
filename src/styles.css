@@ -387,7 +387,7 @@ button {
 
 .stat-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
     gap: 15px;
     margin-bottom: 22px;
 }
@@ -999,7 +999,7 @@ button {
 }
 
 .transaction-row {
-    min-width: 790px;
+    min-width: 960px;
     min-height: 63px;
     border-top: 1px solid #edf1f1;
     display: grid;
@@ -1119,7 +1119,7 @@ button {
 
 .ledger-summary {
     display: grid;
-    grid-template-columns: 1.2fr 1fr 1fr 1fr 1.2fr;
+    grid-template-columns: 1.2fr 1fr 1fr 1fr 1fr 1.2fr;
     background: #fff;
     border: 1px solid var(--line);
     border-radius: 8px;
@@ -1936,6 +1936,8 @@ button {
 }
 
 @media print {
+    .ledger-profit { display: none !important; }
+    .ledger-row { grid-template-columns: 1fr 2.1fr 1.3fr 1fr 1fr auto; min-width: 790px; }
 
     .sidebar,
     .topbar,

@@ -1,5 +1,25 @@
 ﻿export type BalanceAccount = { id: string; opening: number; openingSide: "Dr" | "Cr"; openingDate?: string };
-export type LedgerEntry = { id: string; agencyId: string; type: "sale" | "payment"; amount: number; date: string; createdAt: string; voucher: string; archivedAt?: string };
+export type LedgerEntry = { id: string; agencyId: string; type: "sale" | "payment"; amount: number; ticketCost?: number; date: string; createdAt: string; voucher: string; archivedAt?: string };
+
+export function ticketProfit(entry: { type: string; amount: number; ticketCost?: number; reversalOf?: string }): number | null {
+    if (entry.type !== "sale" || entry.reversalOf || entry.ticketCost === undefined) return null;
+    assertMinor(entry.amount);
+    assertMinor(entry.ticketCost, true);
+    return entry.amount - entry.ticketCost;
+}
+
+export function profitSummary(entries: (LedgerEntry & { reversalOf?: string })[], allEntries = entries) {
+    let total = 0, missingCosts = 0;
+    const byId = new Map(allEntries.map(entry => [entry.id, entry]));
+    for (const entry of entries) {
+        const original = entry.reversalOf ? byId.get(entry.reversalOf) : entry;
+        if (!original || original.type !== "sale" || original.reversalOf) continue;
+        const profit = ticketProfit(original);
+        if (profit === null) { missingCosts++; continue; }
+        total = safeAdd(total, entry.reversalOf ? -profit : profit);
+    }
+    return { total, missingCosts };
+}
 
 export function parseMoney(input: string, allowZero = false): number {
     const value = input.trim();
@@ -55,6 +75,10 @@ export function calculateLedger<T extends LedgerEntry>(agency: BalanceAccount, e
 }
 export function validateEntry(entry: LedgerEntry, agencies: BalanceAccount[], entries: LedgerEntry[], editing = false) {
     movement(entry);
+    if (entry.ticketCost !== undefined) {
+        if (entry.type !== "sale") throw new Error("Ticket cost is only valid for ticket sales.");
+        assertMinor(entry.ticketCost, true);
+    }
     if (!validDate(entry.date)) throw new Error("Select a valid posting date.");
     if (!entry.voucher.trim()) throw new Error("Voucher number is required.");
     if (!agencies.some(agency => agency.id === entry.agencyId)) throw new Error("Select an existing agency.");
