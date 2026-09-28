@@ -108,6 +108,24 @@ service cloud.firestore {
     allow delete: if owner(uid) && advancing(uid) && bulk(uid) && !existsAfter(transactionPath(uid,resource.data.reversalId));
    }
   }
+  match /personalLedgers/{uid}/entries/{id} {
+   function personalOwner() { return request.auth != null && request.auth.uid == uid && (request.auth.token.get('ledgerAccess',false) == true || uid == 'WBQIfRwKFEeTXhS1VT8n8WgL0612'); }
+   function validPersonal(e) { return e.keys().hasOnly(['id','person','direction','amount','paid','date','reason','createdAt','lastPaymentId','deleted']) && e.get('deleted',false) is bool && e.id == id && text(e.person) && e.person.size() <= 200 && text(e.reason) && e.direction in ['receivable','payable'] && money(e.amount,false) && money(e.paid,true) && e.paid <= e.amount && date(e.date) && text(e.createdAt); }
+   function entryPath() { return /databases/$(database)/documents/personalLedgers/$(uid)/entries/$(id); }
+   allow read: if personalOwner();
+   allow create: if personalOwner() && validPersonal(request.resource.data) && request.resource.data.paid == 0 && !request.resource.data.get('deleted',false) && !('lastPaymentId' in request.resource.data);
+   allow update: if personalOwner() && !resource.data.get('deleted',false) && validPersonal(request.resource.data) && (
+    (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['person','direction','amount','date','reason']) && (resource.data.paid == 0 || request.resource.data.date == resource.data.date)) ||
+    (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deleted']) && request.resource.data.get('deleted',false) == true) ||
+    (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paid','lastPaymentId']) && !exists(/databases/$(database)/documents/personalLedgers/$(uid)/entries/$(id)/payments/$(request.resource.data.lastPaymentId)) && getAfter(/databases/$(database)/documents/personalLedgers/$(uid)/entries/$(id)/payments/$(request.resource.data.lastPaymentId)).data.amount == request.resource.data.paid - resource.data.paid)
+   );
+   allow delete: if false;
+   match /payments/{paymentId} {
+    allow read: if personalOwner();
+    allow create: if personalOwner() && !get(entryPath()).data.get('deleted',false) && !getAfter(entryPath()).data.get('deleted',false) && request.resource.data.keys().hasOnly(['id','amount','date','note']) && request.resource.data.id == paymentId && money(request.resource.data.amount,false) && date(request.resource.data.date) && request.resource.data.date >= get(entryPath()).data.date && request.resource.data.note is string && request.resource.data.note.size() <= 4000 && getAfter(entryPath()).data.lastPaymentId == paymentId && getAfter(entryPath()).data.paid == get(entryPath()).data.paid + request.resource.data.amount;
+    allow update,delete: if false;
+   }
+  }
   match /{document=**} { allow read,write: if false; }
  }
 }

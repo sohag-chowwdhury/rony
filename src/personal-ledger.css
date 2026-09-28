@@ -1,0 +1,21 @@
+﻿.personal-ledger { display: grid; gap: 20px; }
+.personal-ledger .panel-heading { padding: 0; gap: 16px; flex-wrap: wrap; }
+.personal-ledger h1 { margin: 0 0 8px; }
+.personal-totals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.personal-totals article { padding: 24px; }
+.personal-totals h2 { margin-bottom: 0; overflow-wrap: anywhere; }
+.personal-help { margin: 0; color: var(--text-muted, #64748b); }
+.personal-search { display: grid; gap: 8px; max-width: 420px; }
+.personal-ledger input, .personal-dialog input, .personal-dialog select, .personal-dialog textarea { width: 100%; box-sizing: border-box; padding: 11px; border: 1px solid #94a3b8; border-radius: 8px; background: inherit; color: inherit; font: inherit; }
+.personal-table { overflow-x: auto; }
+.personal-table table { width: 100%; border-collapse: collapse; }
+.personal-table th, .personal-table td { padding: 16px; text-align: left; border-bottom: 1px solid #94a3b833; }
+.personal-table td { min-width: 120px; white-space: normal; overflow-wrap: anywhere; }
+.personal-table small { display: block; margin-top: 6px; }
+.personal-dialog { width: min(560px, calc(100vw - 32px)); padding: 24px; max-height: 88vh; overflow: auto; }
+.personal-dialog fieldset { border: 0; margin: 0 0 16px; padding: 0; display: grid; gap: 16px; }
+.personal-dialog label { display: grid; gap: 7px; }
+.personal-dialog p, .personal-dialog li { overflow-wrap: anywhere; }
+@media (max-width: 600px) { .personal-totals { grid-template-columns: 1fr; } }
+
+.personal-table td:last-child .outline-button { margin: 3px 6px 3px 0; }

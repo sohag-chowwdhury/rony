@@ -8,6 +8,7 @@ import { validateOpening, protectTransaction, makeReversal, validateMatch, valid
 import { LedgerTools } from "./LedgerTools";
 import InstallGuide from "./InstallGuide";
 import AccountMenu from "./AccountMenu";
+import PersonalLedger from "./PersonalLedgerPage";
 import { useFormSafety } from "./useFormSafety";
 import { AirlineSelect } from "./AirlineSelect";
 import { AgencySelect } from "./AgencySelect";
@@ -65,6 +66,7 @@ import { createLedgerPdf, type StatementData } from "./LedgerStatement";
 
 type Page =
     | "dashboard"
+    | "personal"
     | "agencies"
     | "sales"
     | "payments"
@@ -448,6 +450,7 @@ const navItems: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
     { id: "payments", label: "Payment Receipts", icon: Receipt },
     { id: "ledger", label: "Agency Ledger", icon: BookOpen },
     { id: "reports", label: "Reports", icon: FileBarChart },
+    { id: "personal", label: "Personal", icon: Wallet },
     { id: "reconciliation", label: "Reconciliation", icon: Landmark },
     { id: "archive", label: "Archive", icon: Archive },
     { id: "activity", label: "Activity Log", icon: Activity },
@@ -790,6 +793,7 @@ export default function App() {
                             onRestoreTransaction={(id) => archiveTransaction(id, false)}
                         />
                     )}
+                    {page === "personal" && <PersonalLedger />}
                     {page === "activity" && <ActivityLog events={store.activity} agencies={store.agencies} />}
                     {page === "reconciliation" && <LedgerTools initialTab="match" snapshot={{version:2,agencies:store.agencies,transactions:store.transactions,activity:store.activity}} onRestore={store.restoreBackup} onAgency={store.updateAgency} onReverse={store.reverse} onMatch={store.reconcile} />}
                     {page === "settings" && <><LedgerTools snapshot={{version:2,agencies:store.agencies,transactions:store.transactions,activity:store.activity}} onRestore={store.restoreBackup} onAgency={store.updateAgency} onReverse={store.reverse} onMatch={store.reconcile} /><Settings pending={pending} snapshot={{ version: 2, agencies: store.agencies, transactions: store.transactions, activity: store.activity }} /></>}
