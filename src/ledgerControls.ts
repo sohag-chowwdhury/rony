@@ -65,7 +65,7 @@ export function validateBackup(input: unknown): Snapshot {
     }
     const checked: Transaction[]=[];
     for(const t of data.transactions){
-        if(!t || typeof t!=='object')throw Error('Invalid transaction.');checkId(t.id);scalarText(t,['agencyId','voucher','reference','ticket','passenger','sector','flightDate','method','bank','sendingBank','receivingBank','sendingBankName','receivingBankName','chequeNumber','chequeDate','walletNumber','narration','createdAt','archivedAt','reversalOf']);
+        if(!t || typeof t!=='object')throw Error('Invalid transaction.');checkId(t.id);scalarText(t,['agencyId','voucher','reference','ticket','passenger','sector','flightDate','airlineCode','airlineName','method','bank','sendingBank','receivingBank','sendingBankName','receivingBankName','chequeNumber','chequeDate','walletNumber','narration','createdAt','archivedAt','reversalOf']);
         if(!['synced','pending','failed'].includes(t.status))throw Error('Invalid transaction status.');
         if(t.archivedAt&&!Number.isFinite(Date.parse(t.archivedAt)))throw Error('Invalid transaction archive date.');
         if((t.flightDate&&!validDate(t.flightDate))||(t.chequeDate&&!validDate(t.chequeDate)))throw Error('Invalid transaction date.');

@@ -151,3 +151,23 @@ test('two scoped admins share writes, restore and migration while retaining thei
  assert.equal((await readDirectLedger(sohag.db,ledgerId)).revision,snapshot.revision);
  await assert.rejects(restoreDirectLedger(robin.db,robin.user,backup,snapshot.revision,'shared-import',true,ledgerId),/empty/);
 });
+
+test('ticket airline fields survive Firestore create, edit and reload', async () => {
+ const {db,user}=session('ticket-airline');
+ let snapshot=await mutateDirectLedger(db,user,event('agency','create',null,agency),0);
+ for (const [index, fields] of [{airlineCode:'',airlineName:''},{airlineCode:'BG',airlineName:'Biman Bangladesh Airlines'},{airlineCode:'OTHER',airlineName:'Custom Airline'}].entries()) {
+  const sale={id:`airline-${index}`,type:'sale',agencyId:'a',amount:120000,ticketCost:100000,date:'2026-03-01',voucher:`AIR-${index}`,ticket:`T-${index}`,passenger:'Passenger',createdAt:'2026-03-01T00:00:00Z',status:'pending',...fields};
+  snapshot=await mutateDirectLedger(db,user,event('transaction','create',null,sale),snapshot.revision);
+  const saved=snapshot.transactions.find(t=>t.id===sale.id);
+  assert.equal(saved.airlineCode,fields.airlineCode);
+  assert.equal(saved.airlineName,fields.airlineName);
+ }
+ const before=snapshot.transactions.find(t=>t.id==='airline-1');
+ snapshot=await mutateDirectLedger(db,user,event('transaction','edit',before,{...before,airlineCode:'OTHER',airlineName:'Updated Airline'}),snapshot.revision);
+ const reloaded=await readDirectLedger(db,user.uid);
+ const edited=reloaded.transactions.find(t=>t.id===before.id);
+ assert.equal(edited.airlineName,'Updated Airline');
+ assert.equal(edited.airlineCode,'OTHER');
+ assert.equal(edited.amount,120000);
+ assert.equal(edited.ticketCost,100000);
+});

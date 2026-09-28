@@ -43,7 +43,8 @@ export function transactionLedgerNarration(transaction, agency) {
 	const isTicket = transaction.type === "sale" || outgoingMigration(transaction);
 	if (!isTicket) return transaction.narration || "Payment received";
 	const date = (value) => value.split("-").reverse().join("-");
-	const details = `Ref No : ${transaction.reference || "-"}, Ticket No. ${transaction.ticket || "-"} Sector: ${transaction.sector || "-"}, Voucher No. ${transaction.voucher} to ${agency.name} on ${date(transaction.date)}, Flight Date : ${transaction.flightDate ? date(transaction.flightDate) : "-"}, Pax Name : ${transaction.passenger || "-"}, Ticket sales amount: BDT ${(transaction.amount / 100).toFixed(2)}`;
+	const airline = transaction.airlineName?.trim();
+	const details = `Ref No : ${transaction.reference || "-"}, Ticket No. ${transaction.ticket || "-"} Sector: ${transaction.sector || "-"}${airline ? `, Airline: ${airline}` : ""}, Voucher No. ${transaction.voucher} to ${agency.name} on ${date(transaction.date)}, Flight Date : ${transaction.flightDate ? date(transaction.flightDate) : "-"}, Pax Name : ${transaction.passenger || "-"}, Ticket sales amount: BDT ${(transaction.amount / 100).toFixed(2)}`;
 	return transaction.narration ? `${details}, Notes: ${transaction.narration}` : details;
 }
 // Keep the original debit and its separate migration credit on their posting dates.

@@ -1,8 +1,8 @@
 import { validateOpening, protectTransaction, makeReversal, validateMatch, validateBackup } from './ledgerControls.mjs';
 import { validatePaymentDetails, assertMinor, validateEntry, getBalance, canDeleteAgency, validDate, outgoingMigration, ticketHistory } from './accounting.mjs';
-const textFields = ['id','code','name','contact','phone','address','agencyId','date','voucher','reference','ticket','passenger','sector','flightDate','method','bank','sendingBank','receivingBank','sendingBankName','receivingBankName','chequeNumber','chequeDate','walletNumber','narration','createdAt','archivedAt','openingDate','closedThrough','reversalOf'];
+const textFields = ['id','code','name','contact','phone','address','agencyId','date','voucher','reference','ticket','passenger','sector','flightDate','airlineCode','airlineName','method','bank','sendingBank','receivingBank','sendingBankName','receivingBankName','chequeNumber','chequeDate','walletNumber','narration','createdAt','archivedAt','openingDate','closedThrough','reversalOf'];
 const agencyFields = ['id','code','name','contact','phone','address','opening','openingSide','active','archivedAt','openingDate','closedThrough'];
-const transactionFields = ['id','type','agencyId','date','voucher','reference','ticket','passenger','sector','flightDate','amount','ticketCost','method','bank','sendingBank','receivingBank','sendingBankName','receivingBankName','chequeNumber','chequeDate','walletNumber','narration','status','createdAt','archivedAt','reversalOf','reconciliation','migration','nextMigration'];
+const transactionFields = ['id','type','agencyId','date','voucher','reference','ticket','passenger','sector','flightDate','airlineCode','airlineName','amount','ticketCost','method','bank','sendingBank','receivingBank','sendingBankName','receivingBankName','chequeNumber','chequeDate','walletNumber','narration','status','createdAt','archivedAt','reversalOf','reconciliation','migration','nextMigration'];
 export function validateId(id) {
   if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(id)) throw Error('Invalid record ID.');
 }

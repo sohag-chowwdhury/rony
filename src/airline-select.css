@@ -1,0 +1,19 @@
+.airline-select { position: relative; }
+.airline-select > label { font-size: 10px; color: var(--muted); }
+.airline-options {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #11302e;
+    color: var(--ink);
+    box-shadow: var(--shadow);
+}
+.airline-options [role="option"] { padding: 10px; font-size: 12px; cursor: pointer; }
+.airline-options [role="option"]:hover,
+.airline-options .active { background: var(--mint); }

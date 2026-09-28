@@ -1,0 +1,21 @@
+﻿.agency-select { position: relative; width: 280px; max-width: 100%; }
+.agency-select-input { position: relative; }
+.agency-select-input input {
+    width: 100%; min-height: 36px;
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 9px 30px 9px 10px;
+    background: #122324; color: var(--ink); font: inherit; font-size: 12px;
+}
+.agency-select-input input:focus-visible { outline: 2px solid var(--muted); outline-offset: 2px; }
+.agency-select-input > svg { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--muted); }
+.agency-select-menu {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
+    max-height: 240px; overflow-y: auto;
+    border: 1px solid var(--line); border-radius: 6px;
+    background: #11302e; color: var(--ink); box-shadow: var(--shadow);
+}
+.agency-select-menu [role="option"] { padding: 10px; font-size: 12px; cursor: pointer; overflow-wrap: anywhere; }
+.agency-select-menu [role="option"]:hover,
+.agency-select-menu .active { background: var(--mint); }
+.agency-select-menu p { padding: 10px; margin: 0; color: var(--muted); font-size: 12px; }
+@media (max-width: 768px) { .agency-select-input input { min-height: 42px; } }

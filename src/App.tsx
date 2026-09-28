@@ -9,6 +9,8 @@ import { LedgerTools } from "./LedgerTools";
 import InstallGuide from "./InstallGuide";
 import AccountMenu from "./AccountMenu";
 import { useFormSafety } from "./useFormSafety";
+import { AirlineSelect } from "./AirlineSelect";
+import { AgencySelect } from "./AgencySelect";
 import { encodeCsv } from "./csv";
 import { mergeAgencyEdit, sameRecord } from "./recordComparison";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -105,6 +107,8 @@ export type Transaction = {
     passenger?: string;
     sector?: string;
     flightDate?: string;
+    airlineCode?: string;
+    airlineName?: string;
     amount: number;
     ticketCost?: number;
     method?: string;
@@ -1617,6 +1621,7 @@ function TransactionTable({
                                 : t.method || "Payment"}
                         </b>
                         <small>{t.type === "sale" ? t.ticket : t.reference}</small>
+                        {t.type === "sale" && t.airlineName?.trim() && <small>Airline: {t.airlineName}</small>}
                         <MigrationTag transaction={t} />
                         {t.type === "sale" && !t.reversalOf && !outgoingMigration(t) && <small>{ticketProfit(t) === null ? "Profit: cost not recorded" : `Ticket cost: ${money(t.ticketCost!)} | Profit: ${ticketProfit(t)! < 0 ? "-" : ""}${money(ticketProfit(t)!)}`}</small>}
                     </span>
@@ -1959,19 +1964,7 @@ function LedgerPage({
     return (
         <>
             <div className="ledger-toolbar">
-                <div>
-                    <label>Select agency</label>
-                    <select
-                        value={agency.id}
-                        onChange={(e) => setSelected(e.target.value)}
-                    >
-                        {agencies.map((a) => (
-                            <option key={a.id} value={a.id}>
-                                {a.name} · {a.code}
-                            </option>
-                        ))}
-                    </select>
-                </div>
+                <AgencySelect agencies={agencies} value={agency.id} onChange={setSelected} />
                 <div className="date-filter">
                     <CalendarDays size={16} />
                     <input className="ledger-date-input" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
@@ -2464,6 +2457,8 @@ function SaleForm({
         passenger: initialTransaction?.passenger || "",
         sector: initialTransaction?.sector || "",
         flightDate: initialTransaction?.flightDate || "",
+        airlineCode: initialTransaction?.airlineCode || "",
+        airlineName: initialTransaction?.airlineName || "",
         ticketCost: initialTransaction?.ticketCost === undefined ? "" : String(initialTransaction.ticketCost / 100),
         amount: initialTransaction ? String(initialTransaction.amount / 100) : "",
         narration: initialTransaction?.narration || "",
@@ -2481,8 +2476,10 @@ function SaleForm({
             if (!data.agencyId || !data.date || !data.voucher.trim() || !data.ticket.trim() || !data.passenger.trim() || !data.amount)
                 throw new Error("Please complete all required sale fields.");
             if (!initialTransaction && !data.ticketCost) throw new Error("Enter the ticket amount (cost).");
+            if (data.airlineCode === "OTHER" && !data.airlineName.trim()) throw new Error("Enter the other airline name.");
             await onSave({
                 ...data,
+                airlineName: data.airlineName.trim(),
                 id: initialTransaction?.id || id("sale"),
                 type: "sale",
                 ticketCost: data.ticketCost === "" ? undefined : parseMoney(data.ticketCost, true),
@@ -2558,6 +2555,10 @@ function SaleForm({
                         onChange={(e) => set("sector", e.target.value)}
                     />
                 </Field>
+                <AirlineSelect value={data.airlineCode} onChange={(airlineCode, airlineName) => setData(current => ({ ...current, airlineCode, airlineName: airlineCode === "OTHER" && current.airlineCode === "OTHER" ? current.airlineName : airlineName }))} />
+                {data.airlineCode === "OTHER" && <Field label="Other airline name" required>
+                    <input placeholder="Enter airline name" value={data.airlineName} maxLength={4000} onChange={event => set("airlineName", event.target.value)} />
+                </Field>}
                 <Field label="Flight date">
                     <input
                         type="date"

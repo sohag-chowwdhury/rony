@@ -112,6 +112,8 @@ export function validateBackup(input) {
 			"passenger",
 			"sector",
 			"flightDate",
+			"airlineCode",
+			"airlineName",
 			"method",
 			"bank",
 			"sendingBank",
