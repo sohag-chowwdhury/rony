@@ -44,3 +44,13 @@ test('deleted entries leave totals and reject stale edits or repayments', () => 
  assert.throws(() => editPersonalEntry(deleted, entry), /deleted/);
  assert.throws(() => applyPersonalPayment(deleted, { id: 'p', amount: 100, date: entry.date, note: '' }), /deleted/);
 });
+
+test('optional contact numbers support old entries, editing, clearing and repayments', () => {
+ assert.doesNotThrow(() => validatePersonalEntry(entry));
+ for (const contactNumber of ['', '01712345678', '+880 1712-345678']) assert.doesNotThrow(() => validatePersonalEntry({ ...entry, contactNumber }));
+ for (const contactNumber of [123, null, '1'.repeat(41)]) assert.throws(() => validatePersonalEntry({ ...entry, contactNumber }), /Contact number/);
+ const withContact = editPersonalEntry(entry, { ...entry, contactNumber: '01712345678' });
+ assert.equal(withContact.contactNumber, '01712345678');
+ assert.equal(applyPersonalPayment(withContact, { id: 'p', amount: 100, date: entry.date, note: '' }).contactNumber, '01712345678');
+ assert.equal(editPersonalEntry(withContact, { ...withContact, contactNumber: '' }).contactNumber, '');
+});

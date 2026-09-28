@@ -19,3 +19,6 @@
 .agency-select-menu .active { background: var(--mint); }
 .agency-select-menu p { padding: 10px; margin: 0; color: var(--muted); font-size: 12px; }
 @media (max-width: 768px) { .agency-select-input input { min-height: 42px; } }
+
+.agency-select-menu [role="option"].inactive { opacity: 0.65; }
+.agency-option-status { margin-left: 8px; font-size: 10px; }

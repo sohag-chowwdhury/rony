@@ -73,3 +73,14 @@ test('deleted personal entries reject repayments even with an outstanding balanc
   tx.set(doc(ref, 'payments/p'), { id: 'p', amount: 100, date: '2026-09-28', note: '' });
  }));
 });
+
+test('personal contact number is optional, editable, bounded and private', async () => {
+ const ref = doc(owner, 'personalLedgers/alice/entries/contact-test');
+ const record = { id: 'contact-test', person: 'Rahim', contactNumber: '+880 1712-345678', direction: 'receivable', amount: 10000, paid: 0, date: '2026-09-28', reason: 'Rent', createdAt: '2026-09-28T10:00:00Z' };
+ await assertSucceeds(setDoc(ref, record));
+ await assertSucceeds(updateDoc(ref, { contactNumber: '01712345678' }));
+ await assertSucceeds(updateDoc(ref, { contactNumber: '' }));
+ await assertFails(updateDoc(ref, { contactNumber: 1712345678 }));
+ await assertFails(updateDoc(ref, { contactNumber: '1'.repeat(41) }));
+ await assertFails(getDoc(doc(env.authenticatedContext('bob', { ledgerAccess: true }).firestore(), ref.path)));
+});

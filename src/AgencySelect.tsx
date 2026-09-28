@@ -2,7 +2,7 @@
 import { ChevronDown } from "lucide-react";
 import "./agency-select.css";
 
-type AgencyOption = { id: string; name: string; code: string };
+type AgencyOption = { id: string; name: string; code: string; active: boolean };
 
 export function AgencySelect({ agencies, value, onChange }: {
     agencies: AgencyOption[];
@@ -55,10 +55,11 @@ export function AgencySelect({ agencies, value, onChange }: {
             <div id={`${id}-options`} role="listbox" aria-label="Agencies">
                 {matches.map((agency, index) => <div key={agency.id} id={`${id}-option-${index}`}
                     role="option" aria-selected={agency.id === value}
-                    className={index === activeIndex ? "active" : ""}
+                    className={`${index === activeIndex ? "active" : ""} ${!agency.active ? "inactive" : ""}`}
                     ref={element => { if (index === activeIndex) element?.scrollIntoView({ block: "nearest" }); }}
                     onMouseDown={event => event.preventDefault()} onClick={() => choose(index)}>
                     {agency.name} · {agency.code}
+                    {!agency.active && <span className="agency-option-status">Inactive</span>}
                 </div>)}
             </div>
             {!matches.length && <p role="status">No agencies found</p>}

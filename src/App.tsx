@@ -717,7 +717,7 @@ export default function App() {
                                 const agency = store.agencies.find((item) => item.id === id);
                                 confirmDelete("agency", id, agency?.name || "agency");
                             }}
-                            onDeactivate={async id => { try { await store.deactivateAgency(id); } catch (error) { console.error(error instanceof Error ? error.message : "Unable to deactivate agency."); } }}
+                            onToggleStatus={async agency => { await store.updateAgency({ ...agency, active: !agency.active }, agency); }}
                             onSelect={(id) => {
                                 setSelectedAgency(id);
                                 go("ledger");
@@ -1162,7 +1162,7 @@ function Agencies({
     onSelect,
     onEdit,
     onDelete,
-    onDeactivate,
+    onToggleStatus,
 }: {
     agencies: Agency[];
     transactions: Transaction[];
@@ -1170,29 +1170,39 @@ function Agencies({
     onSelect: (id: string) => void;
     onEdit: (agency: Agency) => void;
     onDelete: (id: string) => void;
-    onDeactivate: (id: string) => void;
+    onToggleStatus: (agency: Agency) => void | Promise<void>;
 }) {
     const [query, setQuery] = useState("");
+    const [activationAgency, setActivationAgency] = useState<Agency | null>(null);
     const [page, setPage] = useState(1);
     const pageSize = 12;
-    const filtered = agencies.filter((agency) => !agency.archivedAt).filter((agency) =>
-        `${agency.name} ${agency.code} ${agency.contact} ${agency.phone} ${agency.address}`
-            .toLowerCase()
-            .includes(query.toLowerCase()),
-    );
+    const [status, setStatus] = useState<"active" | "inactive" | "all">("active");
+    const directory = agencies.filter((agency) => !agency.archivedAt);
+    const searchTerms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const filtered = directory.filter((agency) => status === "all" || agency.active === (status === "active")).filter((agency) => {
+        const fields = [agency.name, agency.code, agency.contact, agency.phone, agency.address]
+            .filter(Boolean).join(" ").toLowerCase();
+        return searchTerms.every(term => fields.includes(term));
+    });
     const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
     const shown = filtered.slice((page - 1) * pageSize, page * pageSize);
-    useEffect(() => setPage(1), [query]);
+    useEffect(() => setPage(1), [query, status]);
     useEffect(() => setPage((current) => Math.min(current, pageCount)), [pageCount]);
     return (
         <>
+            {activationAgency && <AgencyActivationModal agency={activationAgency}
+                onClose={() => setActivationAgency(null)} onConfirm={() => onToggleStatus(activationAgency)} />}
             <div className="section-toolbar">
                 <div className="search-box">
                     <Search size={17} />
                     <input
                         placeholder="Search agency, code, contact, phone or address"
                         value={query}
-                        onChange={(event) => setQuery(event.target.value)}
+                        onChange={(event) => {
+                            setQuery(event.target.value);
+                            setStatus("all");
+                            setPage(1);
+                        }}
                     />
                 </div>
                 <div className="toolbar-actions">
@@ -1211,6 +1221,18 @@ function Agencies({
                         <p>{filtered.length} agencies found · Showing {shown.length}</p>
                     </div>
                 </div>
+                <div className="agency-status-tabs" data-status={status} role="group" aria-label="Agency status">
+                    <span className="agency-status-indicator" aria-hidden="true" />
+                    {(["active", "inactive", "all"] as const).map((item) => (
+                        <button key={item} type="button" className={status === item ? "active" : ""}
+                            aria-pressed={status === item} onClick={() => setStatus(item)}>
+                            <span className="agency-status-dot" aria-hidden="true" />
+                            <span>{item === "all" ? "All" : item === "active" ? "Active" : "Inactive"}</span>
+                            <span className="agency-status-count">{item === "all" ? directory.length : directory.filter((agency) => agency.active === (item === "active")).length}</span>
+                        </button>
+                    ))}
+                </div>
+                {filtered.length === 0 && <p className="agency-empty" role="status">No {status === "all" ? "" : `${status} `}agencies{query.trim() ? " match your search" : " found"}.</p>}
                 <div className="agency-grid">
                     {shown.map((agency) => {
                         const balance = getBalance(agency, transactions);
@@ -1219,13 +1241,16 @@ function Agencies({
                             <div className={`agency-card ${!agency.active ? "inactive" : ""}`} key={agency.id}>
                                 <div className="agency-card-top">
                                     <span className="agency-avatar large">{agency.name.slice(0, 1)}</span>
-                                    <div><h3>{agency.name}</h3><span className="code-pill">{agency.code}</span></div>
-                                    <button className="icon-button" title="Deactivate agency" onClick={() => agency.active && onDeactivate(agency.id)}><MoreHorizontal size={18} /></button>
+                                    <div className="agency-card-identity"><h3>{agency.name}</h3><div className="agency-card-labels"><span className="code-pill">{agency.code}</span>{!agency.active && <span className="inactive-badge">Inactive</span>}</div></div>
+                                    <button type="button" className="agency-activate-toggle" role="switch" aria-checked={agency.active}
+                                        aria-label={`Active status for ${agency.name}`} title={agency.active ? "Deactivate agency" : "Activate agency"} onClick={() => setActivationAgency(agency)}>
+                                        <span className="agency-toggle-track" aria-hidden="true"><span /></span>
+                                        <span>{agency.active ? "Deactivate" : "Activate"}</span>
+                                    </button>
                                 </div>
                                 <div className="agency-detail"><span><Users size={14} /> {agency.contact}</span><span><Activity size={14} /> {agency.phone}</span></div>
                                 <div className="agency-detail"><span>Total profit / loss</span><b>{agencyProfit.total<0?"-":""}{money(agencyProfit.total)}</b>{agencyProfit.missingCosts>0&&<small>Partial: {agencyProfit.missingCosts} missing costs</small>}</div>
                                 <div className="agency-card-bottom"><div><small>Current balance</small><b className={balance < 0 ? "orange-text" : ""}>{money(balanceMeta(balance).value)} <em>{balanceMeta(balance).side}</em></b></div><div className="agency-actions"><AgencyContactButtons agency={agency} /><button className="outline-button" onClick={() => onSelect(agency.id)}>View Ledger <ChevronRight size={14} /></button><button className="outline-button" onClick={() => onEdit(agency)}>Edit</button><button className="danger-button" onClick={() => onDelete(agency.id)}>Archive</button></div></div>
-                                {!agency.active && <span className="inactive-badge">Inactive</span>}
                             </div>
                         );
                     })}
@@ -1234,6 +1259,48 @@ function Agencies({
             </section>
         </>
     );
+}
+
+function AgencyActivationModal({ agency, onClose, onConfirm }: {
+    agency: Agency;
+    onClose: () => void;
+    onConfirm: () => void | Promise<void>;
+}) {
+    const dialogRef = useRef<HTMLDialogElement>(null);
+    const savingRef = useRef(false);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState("");
+    useEffect(() => {
+        const dialog = dialogRef.current;
+        dialog?.showModal();
+        return () => dialog?.close();
+    }, []);
+    const confirm = async () => {
+        if (savingRef.current) return;
+        savingRef.current = true;
+        setSaving(true);
+        setError("");
+        try {
+            await onConfirm();
+            onClose();
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : "Unable to update agency status. Please try again.");
+            savingRef.current = false;
+            setSaving(false);
+        }
+    };
+    return <dialog ref={dialogRef} className="agency-activation-modal" aria-labelledby="agency-activation-title"
+        aria-describedby="agency-activation-description" aria-busy={saving}
+        onCancel={event => { event.preventDefault(); if (!savingRef.current) onClose(); }}>
+        <div className="agency-activation-icon"><Building2 size={22} /></div>
+        <h2 id="agency-activation-title">{agency.active ? "Deactivate" : "Activate"} agency?</h2>
+        <p id="agency-activation-description"><strong>{agency.name}</strong> will move to your {agency.active ? "Inactive" : "Active"} agencies.</p>
+        {error && <p className="agency-activation-error" role="alert">{error}</p>}
+        <div className="agency-activation-actions">
+            <button type="button" className="outline-button" onClick={onClose} disabled={saving} autoFocus>Cancel</button>
+            <button type="button" className="primary-button" onClick={confirm} disabled={saving}>{saving ? "Saving..." : agency.active ? "Confirm deactivation" : "Confirm activation"}</button>
+        </div>
+    </dialog>;
 }
 
 function SalesPage({ agencies, transactions, onAdd, online, onEdit, onDelete, onArchive }: { agencies: Agency[]; transactions: Transaction[]; onAdd: (t: Transaction) => void | Promise<void>; online: boolean; onEdit?: (transaction: Transaction) => void; onDelete?: (id: string) => void; onArchive?: (id: string) => void; }) {

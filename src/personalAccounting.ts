@@ -1,11 +1,12 @@
-﻿export type PersonalEntry = {
-    id: string; person: string; direction: 'receivable' | 'payable';
+export type PersonalEntry = {
+    id: string; person: string; contactNumber?: string; direction: 'receivable' | 'payable';
     amount: number; paid: number; date: string; reason: string; createdAt: string; deleted?: boolean;
 };
 export type PersonalPayment = { id: string; amount: number; date: string; note: string };
 export const PERSONAL_STORAGE_KEY = 'agency-personal-ledger-v1';
 export function validatePersonalEntry(entry: PersonalEntry) {
     if (!entry.id || !entry.person.trim() || entry.person.length > 200 || !entry.reason.trim() || entry.reason.length > 4000) throw Error('Enter a name and reason.');
+    if (entry.contactNumber !== undefined && (typeof entry.contactNumber !== 'string' || entry.contactNumber.length > 40)) throw Error('Contact number must be at most 40 characters.');
     if (!['receivable', 'payable'].includes(entry.direction)) throw Error('Choose whether you will receive or pay.');
     if (!Number.isSafeInteger(entry.amount) || entry.amount <= 0 || !Number.isSafeInteger(entry.paid) || entry.paid < 0 || entry.paid > entry.amount) throw Error('Invalid amount or repayment.');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(entry.date) || new Date(entry.date).toISOString().slice(0, 10) !== entry.date) throw Error('Enter a valid date.');
@@ -32,7 +33,7 @@ export function editPersonalEntry(current: PersonalEntry, changes: PersonalEntry
     if (current.deleted) throw Error('This personal entry has been deleted.');
     if (current.paid > 0 && changes.date !== current.date) throw Error('The original date cannot change after a repayment has been recorded.');
     if (changes.amount < current.paid) throw Error('The original amount cannot be less than the amount already repaid.');
-    const updated = { ...current, person: changes.person, direction: changes.direction, amount: changes.amount, date: changes.date, reason: changes.reason };
+    const updated = { ...current, person: changes.person, contactNumber: changes.contactNumber ?? current.contactNumber ?? '', direction: changes.direction, amount: changes.amount, date: changes.date, reason: changes.reason };
     validatePersonalEntry(updated);
     return updated;
 }

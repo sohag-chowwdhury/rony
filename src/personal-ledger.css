@@ -1,21 +1,140 @@
-﻿.personal-ledger { display: grid; gap: 20px; }
-.personal-ledger .panel-heading { padding: 0; gap: 16px; flex-wrap: wrap; }
-.personal-ledger h1 { margin: 0 0 8px; }
+.personal-ledger { display: grid; gap: 22px; min-width: 0; }
+.personal-header, .personal-title, .personal-total-label, .personal-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.personal-header { flex-wrap: wrap; padding: 6px 0; }
+.personal-title { justify-content: flex-start; }
+.personal-icon { display: grid; place-items: center; flex-shrink: 0; width: 48px; height: 48px; border: 1px solid var(--line); border-radius: 15px; background: var(--mint); color: var(--teal); }
+.personal-eyebrow { font-size: 10px; letter-spacing: 1.8px; font-weight: 700; color: var(--teal); }
+.personal-ledger h1 { margin: 5px 0 7px; font-size: clamp(24px, 3vw, 32px); letter-spacing: -.8px; }
+.personal-header p, .personal-toolbar p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.personal-header .primary-button { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; }
 .personal-totals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
-.personal-totals article { padding: 24px; }
-.personal-totals h2 { margin-bottom: 0; overflow-wrap: anywhere; }
-.personal-help { margin: 0; color: var(--text-muted, #64748b); }
-.personal-search { display: grid; gap: 8px; max-width: 420px; }
-.personal-ledger input, .personal-dialog input, .personal-dialog select, .personal-dialog textarea { width: 100%; box-sizing: border-box; padding: 11px; border: 1px solid #94a3b8; border-radius: 8px; background: inherit; color: inherit; font: inherit; }
+.personal-ledger .personal-total { padding: 14px 18px; border-radius: 13px; background: linear-gradient(125deg, var(--mint), #122324 80%); border-top: 2px solid var(--teal); }
+.personal-ledger .personal-total.payable { background: linear-gradient(125deg, var(--pale-orange), #122324 80%); border-top-color: var(--orange); }
+.personal-total-label { color: var(--muted); font-size: 13px; font-weight: 600; }
+.personal-total .personal-icon { width: 28px; height: 28px; border-radius: 9px; }
+.personal-total.payable .personal-icon { color: var(--orange); background: var(--pale-orange); }
+.personal-total h2 { margin: 5px 0 6px; font-size: clamp(20px, 2.3vw, 26px); letter-spacing: -.5px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.personal-total p { margin: 0; color: var(--muted); font-size: 10px; }
+.personal-help { display: flex; align-items: flex-start; gap: 9px; margin: -4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.personal-help svg { flex-shrink: 0; margin-top: 1px; color: var(--teal); }
+.personal-ledger .personal-records { border-radius: 18px; min-width: 0; overflow: hidden; }
+.personal-toolbar { padding: 22px; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+.personal-toolbar h2 { display: flex; align-items: center; gap: 9px; margin: 0 0 6px; font-size: 16px; }
+.personal-count { padding: 3px 8px; font-size: 11px; border-radius: 7px; background: var(--mint); color: var(--teal); }
+.personal-search { display: flex; align-items: center; gap: 10px; width: min(100%, 300px); padding: 0 13px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); background: #0c1b1c; }
+.personal-search svg { flex-shrink: 0; }
+.personal-ledger .personal-search input { width: 100%; min-width: 0; padding: 12px 0; border: 0; outline: none; background: transparent; color: var(--ink); font: inherit; font-size: 12px; }
+.personal-search:focus-within { outline: 2px solid var(--teal); outline-offset: 2px; }
 .personal-table { overflow-x: auto; }
-.personal-table table { width: 100%; border-collapse: collapse; }
-.personal-table th, .personal-table td { padding: 16px; text-align: left; border-bottom: 1px solid #94a3b833; }
-.personal-table td { min-width: 120px; white-space: normal; overflow-wrap: anywhere; }
-.personal-table small { display: block; margin-top: 6px; }
-.personal-dialog { width: min(560px, calc(100vw - 32px)); padding: 24px; max-height: 88vh; overflow: auto; }
+.personal-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.personal-table th, .personal-table td { padding: 18px 16px; text-align: left; border-bottom: 1px solid var(--line); }
+.personal-table th { color: var(--muted); font-size: 10px; letter-spacing: .65px; text-transform: uppercase; white-space: nowrap; background: #0d1d1e; }
+.personal-table td { min-width: 95px; overflow-wrap: anywhere; }
+.personal-table tbody tr:last-child td { border-bottom: 0; }
+.personal-table tbody tr:hover { background: #ffffff03; }
+.personal-table small { display: block; margin-top: 6px; color: var(--muted); font-size: 10px; }
+.personal-person { display: flex; align-items: center; gap: 10px; min-width: 140px; }
+.personal-person > div { min-width: 0; }
+.personal-avatar { display: grid; place-items: center; width: 34px; height: 34px; flex-shrink: 0; border-radius: 11px; background: var(--mint); color: var(--teal); font-weight: 700; }
+.personal-reason { max-width: 240px; color: var(--muted); line-height: 1.6; }
+.personal-badge { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; padding: 6px 8px; border-radius: 7px; font-size: 10px; font-weight: 600; background: var(--mint); color: var(--teal); }
+.personal-badge.payable { background: var(--pale-orange); color: var(--orange); }
+.personal-money, .personal-balance { font-variant-numeric: tabular-nums; }
+.personal-progress { height: 4px; margin-top: 9px; overflow: hidden; border-radius: 6px; background: var(--line); }
+.personal-progress span { display: block; height: 100%; background: var(--teal); border-radius: inherit; }
+.personal-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 165px; }
+.personal-actions .outline-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; min-height: 34px; font-size: 10px; border-radius: 8px; }
+.personal-actions .personal-history, .personal-actions .personal-payment { justify-content: flex-start; color: var(--teal); }
+.personal-actions .personal-delete { color: #f49d9d; }
+.personal-ledger button:focus-visible, .personal-dialog button:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
+.personal-empty { padding: 46px 20px; text-align: center; color: var(--muted); }
+.personal-empty svg { color: var(--teal); }
+.personal-empty h3 { margin: 14px 0 8px; color: var(--ink); font-size: 16px; }
+.personal-empty p { margin: 0 0 14px; line-height: 1.7; }
+.personal-dialog { width: min(560px, calc(100vw - 32px)); box-sizing: border-box; padding: 28px; max-height: 88vh; overflow: auto; border-radius: 18px; }
+.personal-dialog h2 { margin-top: 0; font-size: 21px; line-height: 1.4; }
 .personal-dialog fieldset { border: 0; margin: 0 0 16px; padding: 0; display: grid; gap: 16px; }
-.personal-dialog label { display: grid; gap: 7px; }
-.personal-dialog p, .personal-dialog li { overflow-wrap: anywhere; }
-@media (max-width: 600px) { .personal-totals { grid-template-columns: 1fr; } }
+.personal-dialog label { display: grid; gap: 8px; font-size: 12px; font-weight: 600; }
+.personal-dialog input, .personal-dialog select, .personal-dialog textarea { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: #0c1b1c; color: var(--ink); font: inherit; font-size: 14px; }
+.personal-dialog input:focus-visible, .personal-dialog select:focus-visible, .personal-dialog textarea:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.personal-dialog textarea { min-height: 90px; resize: vertical; }
+.personal-dialog p, .personal-dialog li { overflow-wrap: anywhere; line-height: 1.7; color: var(--muted); }
+.personal-dialog li { padding: 8px 0; }
+@media (max-width: 700px) {
+    .personal-ledger { gap: 18px; }
+    .personal-title > .personal-icon { display: none; }
+    .personal-header .primary-button { width: 100%; justify-content: center; }
+    .personal-totals { gap: 10px; }
+    .personal-ledger .personal-total { padding: 12px; border-radius: 12px; }
+    .personal-total h2 { font-size: 19px; letter-spacing: -.5px; }
+    .personal-total-label { font-size: 12px; gap: 6px; }
+    .personal-total .personal-icon { width: 28px; height: 28px; border-radius: 8px; }
+    .personal-total p { font-size: 10px; line-height: 1.6; }
+    .personal-toolbar { padding: 18px; }
+    .personal-search { width: 100%; }
+    .personal-table table, .personal-table tbody { display: block; }
+    .personal-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    .personal-table tr { display: block; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+    .personal-table tr:last-child { border-bottom: 0; }
+    .personal-table td, .personal-table tbody tr:last-child td { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: start; gap: 8px; min-width: 0; padding: 9px 0; border: 0; max-width: none; }
+    .personal-table td::before { content: attr(data-label); color: var(--muted); font-size: 11px; padding-top: 2px; }
+    .personal-table td:first-child { display: block; padding: 0 0 14px; }
+    .personal-table td:first-child::before { display: none; }
+    .personal-badge { justify-self: start; }
+    .personal-balance .personal-progress, .personal-balance small { grid-column: 2; margin-top: 0; }
+    .personal-actions { min-width: 0; }
+    .personal-actions .outline-button { min-height: 40px; }
+    .personal-table td[colspan] { display: block; }
+    .personal-dialog { padding: 22px; }
+    .personal-dialog input, .personal-dialog select, .personal-dialog textarea { font-size: 16px; }
+}
+@media (max-width: 360px) { .personal-totals { grid-template-columns: 1fr; } }
+.personal-dialog-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.personal-dialog-heading .personal-icon { width: 34px; height: 34px; border-radius: 10px; }
+.personal-dialog-heading h2 { margin: 0; font-size: 16px; }
+.personal-dialog-heading p { margin: 3px 0 0; font-size: 12px; }
+.personal-repayment-dialog { width: min(460px, calc(100vw - 28px)); padding: 20px; font-size: 12px; }
+.personal-repayment-dialog .personal-dialog-reason { margin: 0 0 12px; font-size: 11px; line-height: 1.5; max-height: 60px; overflow: auto; }
+.personal-repayment-summary { --repayment-accent: var(--teal); border: 1px solid var(--line); border-radius: 12px; background: var(--mint); overflow: hidden; }
+.personal-repayment-summary.payable { --repayment-accent: var(--orange); background: var(--pale-orange); }
+.personal-due { display: grid; gap: 5px; padding: 14px; }
+.personal-due > span { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: var(--repayment-accent); }
+.personal-due > strong { font-size: 24px; font-variant-numeric: tabular-nums; letter-spacing: -.5px; overflow-wrap: anywhere; }
+.personal-due > small { font-size: 10px; color: var(--muted); }
+.personal-repayment-breakdown { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0; padding: 12px 14px; border-top: 1px solid var(--line); background: #122324; }
+.personal-repayment-breakdown dt { font-size: 10px; color: var(--muted); }
+.personal-repayment-breakdown dd { margin: 5px 0 0; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.personal-history-section { margin: 16px 0; }
+.personal-history-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.personal-history-heading h3, .personal-repayment-form-title { margin: 0; font-size: 12px; font-weight: 600; }
+.personal-history-heading > span { color: var(--muted); font-size: 10px; }
+.personal-history-empty { margin: 8px 0 0; padding: 12px; border: 1px dashed var(--line); border-radius: 8px; font-size: 11px; text-align: center; }
+.personal-history-list { list-style: none; padding: 0; margin: 8px 0 0; max-height: 148px; overflow: auto; }
+.personal-history-list li { display: grid; grid-template-columns: 7px minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 9px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 11px; }
+.personal-history-list li:last-child { border-bottom: 0; }
+.personal-history-dot { width: 6px; height: 6px; margin-top: 6px; border-radius: 50%; background: var(--teal); }
+.personal-history-list time { color: var(--ink); }
+.personal-history-list p { margin: 3px 0 0; font-size: 10px; line-height: 1.5; }
+.personal-history-list strong { text-align: right; color: var(--ink); font-size: 11px; font-variant-numeric: tabular-nums; }
+.personal-repayment-form-title { padding-top: 14px; margin-bottom: 12px; border-top: 1px solid var(--line); }
+.personal-repayment-dialog fieldset { min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 10px; }
+.personal-repayment-dialog label { font-size: 11px; gap: 6px; min-width: 0; }
+.personal-repayment-dialog label:has(textarea), .personal-repayment-dialog fieldset > button, .personal-repayment-dialog fieldset > [role="alert"] { grid-column: 1 / -1; }
+.personal-repayment-dialog input, .personal-repayment-dialog textarea { min-width: 0; padding: 9px 10px; font-size: 12px; }
+.personal-repayment-dialog textarea { min-height: 54px; }
+.personal-repayment-dialog .primary-button, .personal-repayment-dialog > .outline-button { width: 100%; min-height: 38px; padding: 9px 12px; font-size: 12px; }
+@media (max-width: 480px) {
+    .personal-repayment-dialog { padding: 16px; }
+    .personal-repayment-dialog input, .personal-repayment-dialog textarea { font-size: 16px; }
+    .personal-due > strong { font-size: 22px; }
+}
+@media (max-width: 380px) { .personal-repayment-dialog fieldset { grid-template-columns: minmax(0, 1fr); } }
 
-.personal-table td:last-child .outline-button { margin: 3px 6px 3px 0; }
+.personal-exports { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.personal-exports label { display: grid; gap: 6px; flex: 1 1 200px; max-width: 320px; min-width: 0; font-size: 12px; color: var(--muted); }
+.personal-exports select { width: 100%; min-width: 0; min-height: 44px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #0c1b1c; color: var(--ink); font: inherit; }
+.personal-exports select:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.personal-exports .outline-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; }
+.personal-pagination { padding: 16px 20px; margin: 0; flex-wrap: wrap; gap: 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.personal-page-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.personal-page-controls .outline-button { min-height: 40px; }

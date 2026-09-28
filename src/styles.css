@@ -1993,3 +1993,123 @@ button {
 @media print { .transaction-action-menu, .transaction-menu-trigger { display:none !important; } }
 
 .ledger-row .ledger-description { overflow-wrap: anywhere; white-space: normal; line-height: 1.5; margin-bottom: 8px; }
+
+.agency-empty { padding: 0 22px; color: var(--muted); }
+
+/* Agency directory status switch */
+.agency-status-tabs {
+    position: relative;
+    isolation: isolate;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: min(460px, calc(100% - 44px));
+    margin: 0 22px 24px;
+    padding: 5px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(0, 0, 0, 0.12);
+}
+.agency-status-indicator {
+    position: absolute;
+    z-index: -1;
+    top: 5px;
+    bottom: 5px;
+    left: 5px;
+    width: calc((100% - 10px) / 3);
+    border: 1px solid color-mix(in srgb, var(--teal) 38%, transparent);
+    border-radius: 10px;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--teal) 22%, var(--mint)), var(--mint));
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.agency-status-tabs[data-status="inactive"] .agency-status-indicator { transform: translateX(100%); }
+.agency-status-tabs button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 42px;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 200ms ease;
+}
+.agency-status-tabs button:hover { color: var(--ink); }
+.agency-status-tabs button.active { color: var(--teal); }
+.agency-status-tabs button:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
+.agency-status-dot { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: currentColor; opacity: 0.5; }
+.agency-status-tabs button.active .agency-status-dot { opacity: 1; animation: agency-status-glow 650ms ease-out; }
+.agency-status-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: 7px;
+    background: rgba(128, 160, 154, 0.1);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    transition: background 200ms ease, color 200ms ease;
+}
+.agency-status-tabs button.active .agency-status-count { background: color-mix(in srgb, var(--teal) 18%, transparent); }
+@keyframes agency-status-glow {
+    from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--teal) 40%, transparent); }
+    to { box-shadow: 0 0 0 7px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .agency-status-indicator, .agency-status-tabs button, .agency-status-count { transition: none; }
+    .agency-status-tabs button.active .agency-status-dot { animation: none; }
+}
+
+.agency-activate-toggle {
+    margin-left: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding: 4px;
+    border: 0;
+    background: transparent;
+    color: var(--ink);
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+}
+.agency-toggle-track { display: block; width: 36px; height: 21px; padding: 3px; border: 1px solid var(--muted); border-radius: 20px; background: var(--line); transition: border-color 180ms ease; }
+.agency-toggle-track > span { display: block; width: 13px; height: 13px; border-radius: 50%; background: var(--muted); }
+.agency-activate-toggle:hover .agency-toggle-track { border-color: var(--teal); }
+.agency-activate-toggle:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; border-radius: 5px; }
+.agency-activation-modal { width: min(390px, calc(100vw - 32px)); margin: auto; padding: 26px; border: 1px solid var(--line); border-radius: 18px; background: #122324; color: var(--ink); box-shadow: var(--shadow); }
+.agency-activation-modal::backdrop { background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(4px); }
+.agency-activation-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 13px; background: var(--mint); color: var(--teal); margin-bottom: 16px; }
+.agency-activation-modal h2 { margin: 0 0 10px; font-size: 19px; }
+.agency-activation-modal p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.agency-activation-modal strong { color: var(--ink); }
+.agency-activation-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+.agency-activation-modal .agency-activation-error { color: var(--orange); margin-top: 12px; }
+.agency-activation-actions button:disabled { opacity: 0.6; cursor: wait; }
+
+.agency-card-identity { flex: 1; min-width: 0; }
+.agency-card-identity h3 { overflow-wrap: anywhere; }
+.agency-card-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.agency-card-labels .inactive-badge { position: static; }
+.agency-card-top .agency-activate-toggle { flex-shrink: 0; }
+
+.agency-status-tabs[data-status="all"] .agency-status-indicator { transform: translateX(200%); }
+.agency-toggle-track > span { transition: transform 180ms ease; }
+.agency-activate-toggle[aria-checked="true"] .agency-toggle-track { border-color: var(--teal); background: var(--teal); }
+.agency-activate-toggle[aria-checked="true"] .agency-toggle-track > span { transform: translateX(13px); background: #fff; }
+@media (max-width: 480px) {
+    .agency-status-tabs button { gap: 4px; padding: 8px 4px; }
+    .agency-status-tabs .agency-status-dot { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .agency-toggle-track, .agency-toggle-track > span { transition: none; }
+}
