@@ -22,3 +22,8 @@
 
 .agency-select-menu [role="option"].inactive { opacity: 0.65; }
 .agency-option-status { margin-left: 8px; font-size: 10px; }
+
+.sale-agency-select { width: 100%; display: grid; gap: 6px; align-content: start; }
+.sale-agency-select > label { font-size: 10px; color: var(--muted); }
+.sale-agency-select > label i { color: #c56d39; margin-left: 2px; font-style: normal; }
+.sale-agency-select .agency-select-input input { height: 38px; font-size: 11px; }

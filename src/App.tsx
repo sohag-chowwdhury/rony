@@ -2520,7 +2520,7 @@ function SaleForm({
 }) {
     const notify = useContext(ToastContext);
     const [data, setData] = useState({
-        agencyId: initialTransaction?.agencyId || initialAgencyId || agencies.find(a => a.active && !a.archivedAt)?.id || "",
+        agencyId: initialTransaction?.agencyId || initialAgencyId || agencies.find(a => a.active && !a.archivedAt)?.id || agencies.find(a => !a.archivedAt)?.id || "",
         date: initialTransaction?.date || getToday(),
         voucher: initialTransaction?.voucher || createVoucher("V", initialTransaction?.date || getToday()),
         reference: initialTransaction?.reference || "",
@@ -2570,20 +2570,14 @@ function SaleForm({
         >
             {safety.error && <p className="form-save-error" role="alert">{safety.error} Your entries are still in this form.</p>}
             <div className="form-grid">
-                <Field label="Agency" required>
-                    <select
-                        value={data.agencyId}
-                        onChange={(e) => set("agencyId", e.target.value)}
-                    >
-                        {agencies
-                            .filter((a) => (a.active && !a.archivedAt) || a.id === initialTransaction?.agencyId)
-                            .map((a) => (
-                                <option key={a.id} value={a.id}>
-                                    {a.name}
-                                </option>
-                            ))}
-                    </select>
-                </Field>
+                <AgencySelect
+                    label="Agency"
+                    required
+                    className="sale-agency-select"
+                    agencies={agencies.filter((a) => !a.archivedAt || a.id === initialTransaction?.agencyId)}
+                    value={data.agencyId}
+                    onChange={(agencyId) => set("agencyId", agencyId)}
+                />
                 <Field label="Posting date" required>
                     <input
                         type="date"

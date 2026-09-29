@@ -1,41 +1,44 @@
-﻿import { useId, useState } from "react";
+import { useId, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import "./agency-select.css";
 
 type AgencyOption = { id: string; name: string; code: string; active: boolean };
 
-export function AgencySelect({ agencies, value, onChange }: {
+export function AgencySelect({ agencies, value, onChange, label = "Select agency", required = false, className = "" }: {
+    label?: string;
+    required?: boolean;
+    className?: string;
     agencies: AgencyOption[];
     value: string;
     onChange: (id: string) => void;
 }) {
     const id = useId();
     const [open, setOpen] = useState(false);
-    const [query, setQuery] = useState("");
+    const [query, setQuery] = useState<string | null>(null);
     const [active, setActive] = useState(0);
     const selected = agencies.find(agency => agency.id === value);
     const matches = agencies.filter(agency =>
-        `${agency.name} ${agency.code}`.toLowerCase().includes(query.trim().toLowerCase()));
+        `${agency.name} ${agency.code}`.toLowerCase().includes((query ?? "").trim().toLowerCase()));
     const activeIndex = Math.min(active, matches.length - 1);
-    const close = () => { setOpen(false); setQuery(""); };
+    const close = () => { setOpen(false); setQuery(null); };
     const choose = (index: number) => {
         const agency = matches[index];
         if (!agency) return;
         onChange(agency.id);
         close();
     };
-    return <div className="agency-select" onBlur={event => {
+    return <div className={`agency-select ${className}`} onBlur={event => {
         if (!event.currentTarget.contains(event.relatedTarget)) close();
     }}>
-        <label htmlFor={id}>Select agency</label>
+        <label htmlFor={id}>{label}{required && <i aria-hidden="true">*</i>}</label>
         <div className="agency-select-input">
-            <input id={id} role="combobox" aria-autocomplete="list" aria-expanded={open}
+            <input id={id} role="combobox" aria-autocomplete="list" aria-expanded={open} aria-required={required}
                 aria-controls={open ? `${id}-options` : undefined}
                 aria-activedescendant={open && activeIndex >= 0 ? `${id}-option-${activeIndex}` : undefined}
                 autoComplete="off" placeholder="Search agency name or code"
-                value={open ? query : selected ? `${selected.name} · ${selected.code}` : ""}
-                onFocus={() => { setOpen(true); setActive(0); }}
-                onClick={() => { if (!open) { setOpen(true); setActive(0); } }}
+                value={open && query !== null ? query : selected ? `${selected.name} · ${selected.code}${!selected.active ? " (Inactive)" : ""}` : ""}
+                onFocus={event => { setOpen(true); setActive(0); event.target.select(); }}
+                onClick={event => { if (!open) { setOpen(true); setActive(0); event.currentTarget.select(); } }}
                 onChange={event => { setQuery(event.target.value); setActive(0); setOpen(true); }}
                 onKeyDown={event => {
                     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
