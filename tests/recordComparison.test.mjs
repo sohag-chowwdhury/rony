@@ -23,6 +23,25 @@ test('real edits, archiving and removed records still block stale saves', () => 
 });
 
 const agency = { id: 'a', code: 'A', name: 'Agency', contact: '', phone: '', address: '', opening: 10000, openingSide: 'Dr', active: true };
+for (const active of [false, true]) {
+    test(`agency status changes from ${active} to ${!active} reach the save step`, () => {
+        const original = { ...agency, active };
+        const submitted = { ...original, active: !active };
+        const result = mergeAgencyEdit(original, original, submitted);
+        assert.equal(sameRecord(original, result), false);
+        assert.deepEqual(result, submitted);
+        assert.equal(original.active, active);
+    });
+}
+
+test('status changes preserve newer agency details and can be safely retried', () => {
+    const latest = { ...agency, phone: '123', opening: 20000 };
+    const submitted = { ...agency, active: false };
+    const result = mergeAgencyEdit(latest, agency, submitted);
+    assert.deepEqual(result, { ...latest, active: false });
+    assert.deepEqual(mergeAgencyEdit(result, agency, submitted), result);
+});
+
 test('agency edits merge with unrelated changes and preserve extra record data', () => {
     const latest = { ...agency, phone: '123', active: false, metadata: { revision: 2 } };
     const result = mergeAgencyEdit(latest, agency, { ...agency, opening: 454545500 });

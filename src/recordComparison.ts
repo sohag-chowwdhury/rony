@@ -23,6 +23,8 @@ export function mergeAgencyEdit(current: Agency | undefined, original: Agency, s
         }
         next[field] = edited;
     }
+    // Apply explicit status changes while preserving newer status for unrelated form edits.
+    if (submitted.active !== original.active) next.active = submitted.active;
     // Amount and Dr/Cr side are one value; merging them separately could change its meaning.
     const sameOpening = (a: Agency, b: Agency) => a.opening === b.opening && a.openingSide === b.openingSide && a.openingDate === b.openingDate;
     if (!sameOpening(submitted, original)) {
